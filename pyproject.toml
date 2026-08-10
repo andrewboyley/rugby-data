@@ -1,0 +1,19 @@
+[project]
+name = "rugby-composition-predictor"
+version = "0.1.0"
+description = "Build a dataset and co-occurrence graph of South African international rugby matches"
+readme = "README.md"
+authors = [
+    { name = "andrewboyley", email = "andy.boyley@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+rugby-composition-predictor = "rugby_composition_predictor.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
