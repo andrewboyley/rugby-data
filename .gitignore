@@ -12,3 +12,7 @@ wheels/
 # Generated data files
 *.json.tmp
 *.json.corrupt
+# CocoIndex Code (ccc)
+/.cocoindex_code/
+# CodeGraph index
+/.codegraph/

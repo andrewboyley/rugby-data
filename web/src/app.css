@@ -1,0 +1,75 @@
+:root {
+  --bg: #11151c; --panel: #1a2029; --text: #d6dbe2; --muted: #8a93a0;
+  --accent: #7db4ff; --border: #2a323e;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 14px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+}
+header {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 10px 16px; background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+#stats { color: var(--muted); font-size: 12px; }
+.control { display: flex; align-items: center; gap: 8px; font-size: 12px;
+           color: var(--muted); }
+.control input[type=range] { width: 140px; }
+.control select.team {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 4px 8px; font-size: 12px;
+}
+.btn { background: var(--bg); border: 1px solid var(--border);
+       color: var(--text); padding: 5px 12px; border-radius: 6px;
+       font-size: 12px; cursor: pointer; }
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+#params { background: var(--panel); border-bottom: 1px solid var(--border);
+          padding: 8px 16px; display: flex; flex-wrap: wrap;
+          gap: 16px; align-items: center; }
+#params .prow { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+#params .control { flex-direction: column; align-items: flex-start; gap: 2px; }
+#hud {
+  position: absolute; right: 16px; top: 64px; z-index: 10;
+  background: rgba(26,32,41,.9); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; font-size: 12px;
+  max-width: 260px;
+}
+#hud .name { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+#hud .row { color: var(--muted); margin: 2px 0; }
+#hud .links { color: var(--muted); margin-top: 6px; font-size: 11px;
+              max-height: 120px; overflow-y: auto; }
+#hud .clear { margin-top: 6px; }
+#legend {
+  position: absolute; left: 16px; bottom: 16px; z-index: 10;
+  background: rgba(26,32,41,.9); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; font-size: 11px; color: var(--muted);
+}
+#legend .sw { display: inline-block; width: 10px; height: 10px;
+              border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+svg.graph { width: 100vw; height: calc(100vh - 48px); display: block; }
+.node { cursor: pointer; }
+.node-label { font-size: 10px; fill: var(--muted); pointer-events: none;
+              text-shadow: 0 1px 2px #000; }
+.dim { opacity: .08; }
+.tip {
+  position: absolute; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 10px; font-size: 12px;
+  pointer-events: none; z-index: 30;
+}
+.search-wrap { position: relative; }
+#search { background: var(--bg); border: 1px solid var(--border);
+          color: var(--text); padding: 5px 10px; border-radius: 6px;
+          font-size: 12px; width: 200px; outline: none; }
+#search:focus { border-color: var(--accent); }
+#search-results { position: absolute; z-index: 20; background: var(--panel);
+                  border: 1px solid var(--border); border-radius: 6px;
+                  max-height: 220px; overflow-y: auto; min-width: 220px;
+                  box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+#search-results div { padding: 6px 10px; cursor: pointer; font-size: 12px; }
+#search-results div:hover { background: var(--border); }
+#search-results .team { color: var(--muted); }

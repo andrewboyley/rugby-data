@@ -20,23 +20,32 @@ already-fetched events.
 
 ## Visualisation
 
-Serve the repo root and open the viewer:
+A Svelte app in `web/` renders the graph. Build and serve it with Vite:
 
 ```sh
-.venv/bin/python -m http.server 8787
-# http://localhost:8787/web/view_graph.html
+just serve                            # builds dist/, previews on localhost:8787
+# http://localhost:8787/
+```
+
+Or run the steps separately:
+
+```sh
+just web                              # npm ci && vite build -> dist/
+cd web && npm run preview             # serves dist/ + repo data/ on :8787
 ```
 
 Nodes are players (size = appearances, colour = degree), edges connect
-players who shared a match (width/opacity = co-occurrence count). Click a node
-to focus its teammates; use the sliders to filter and the force-parameter
-panel to tune the layout.
+players who shared a match (width/opacity = co-occurrence count). Filter by
+min shared matches, max degree or team; click a node to focus its teammates;
+use the search box to jump to a player and the force-parameter panel to tune
+the layout.
 
 ## Layout
 
 ```
 data/   dataset.json, graph.json, api_cache.json (generated)
-web/    view_graph.html (browser visualisation)
+dist/   built viewer (generated)
+web/    Svelte source for the browser visualisation
 src/    rugby_composition_predictor package
 ```
 

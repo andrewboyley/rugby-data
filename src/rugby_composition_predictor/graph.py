@@ -5,7 +5,7 @@ in the same team's roster in the same match. Edge weight is the number of
 shared matches.
 """
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -22,6 +22,7 @@ class CoOccurrenceGraph:
         """Compute the graph and return its serializable form."""
         weights: Dict[Tuple[int, int], int] = defaultdict(int)
         appearances: Dict[int, int] = defaultdict(int)
+        team_counts: Dict[int, Counter] = defaultdict(Counter)
 
         for game in self._dataset.games:
             for competitor in game.competitors:
@@ -29,6 +30,7 @@ class CoOccurrenceGraph:
                     entry.player_id for entry in competitor.roster)
                 for player_id in roster:
                     appearances[player_id] += 1
+                    team_counts[player_id][competitor.team_id] += 1
                 for i in range(len(roster)):
                     for j in range(i + 1, len(roster)):
                         a, b = roster[i], roster[j]
@@ -37,6 +39,10 @@ class CoOccurrenceGraph:
 
         edges = [{"playerA": a, "playerB": b, "weight": w}
                  for (a, b), w in weights.items()]
+        player_teams = {
+            pid: counts.most_common(1)[0][0]
+            for pid, counts in team_counts.items()
+        }
 
         return {
             "type": "player-co-occurrence",
@@ -45,6 +51,8 @@ class CoOccurrenceGraph:
             "numEdges": len(edges),
             "players": {str(k): v for k, v in self._dataset.players.items()},
             "appearances": {str(k): v for k, v in appearances.items()},
+            "playerTeams": {str(k): v for k, v in player_teams.items()},
+            "teams": {str(k): v for k, v in self._dataset.teams.items()},
             "edges": edges,
         }
 

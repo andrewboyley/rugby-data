@@ -22,9 +22,13 @@ build: dataset graph
 
 # --- web ---------------------------------------------------------------------
 
-# Serve the repo for the browser visualisation (localhost:8787)
-serve:
-    {{ venv }}/python -m http.server 8787
+# Build the Svelte viewer into dist/
+web:
+    cd web && npm ci && npm run build
+
+# Serve the built viewer with Vite (localhost:8787); rebuilds first
+serve: web
+    cd web && npm run preview
 
 # --- checks ------------------------------------------------------------------
 
@@ -51,6 +55,6 @@ stage:
 #   type: feat | fix | refactor | chore | docs | test | perf | style | build | revert
 # Example: just commit fix "resume skips cached events" "only mark complete games processed"
 commit type summary body="":
-    @test "$type" = "feat" -o "$type" = "fix" -o "$type" = "refactor" -o "$type" = "chore" -o "$type" = "docs" -o "$type" = "test" -o "$type" = "perf" -o "$type" = "style" -o "$type" = "build" -o "$type" = "revert" || { echo "invalid type: $type"; exit 1; }
+    @test "{{ type }}" = "feat" -o "{{ type }}" = "fix" -o "{{ type }}" = "refactor" -o "{{ type }}" = "chore" -o "{{ type }}" = "docs" -o "{{ type }}" = "test" -o "{{ type }}" = "perf" -o "{{ type }}" = "style" -o "{{ type }}" = "build" -o "{{ type }}" = "revert" || { echo "invalid type: {{ type }}"; exit 1; }
     git add -A
-    git commit -m "$type: $summary" -m "$body"
+    @if [ -n "{{ body }}" ]; then git commit -m "{{ type }}: {{ summary }}" -m "{{ body }}"; else git commit -m "{{ type }}: {{ summary }}"; fi
