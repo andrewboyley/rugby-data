@@ -37,8 +37,9 @@ cd web && npm run preview             # serves dist/ + repo data/ on :8787
 Nodes are players (size = appearances, colour = degree), edges connect
 players who shared a match (width/opacity = co-occurrence count). Filter by
 min shared matches, max degree or team; click a node to focus its teammates;
-use the search box to jump to a player and the force-parameter panel to tune
-the layout.
+use the search box to jump to a player, the Recenter button to zoom the view
+to the currently filtered players, and the force-parameter panel to tune the
+layout.
 
 ## Layout
 

@@ -12,16 +12,40 @@
   let minW = $state(1);
   let maxD = $state(90);
   let team = $state(null);
+  let dateStart = $state(null);
+  let dateEnd = $state(null);
   let selectedId = $state(null);
   let hover = $state(null); // { node, x, y }
   let showParams = $state(false);
-  let params = $state({ dist: 120, str: 0.4, chg: -600, coll: 8, decay: 0.02 });
+  const defaultParams = { dist: 120, str: 0.4, chg: -600, coll: 8, decay: 0.04 };
+  let params = $state({ ...defaultParams });
+  let defaultDateStart = $state(null);
+  let defaultDateEnd = $state(null);
+  let graphCmp;
 
   const nodes = $derived(graph ? graph.nodes : []);
   const links = $derived(graph ? graph.links : []);
   const teams = $derived(graph ? graph.teams : {});
   const maxGlobalDeg = $derived(graph ? graph.maxGlobalDeg : 1);
-  const view = $derived(visibleSubset(nodes, links, minW, maxD, team));
+  const posByNode = new Map(); // last layout positions by node id (non-reactive)
+  const view = $derived(
+    visibleSubset(nodes, links, minW, maxD, team, dateStart, dateEnd, posByNode));
+
+  $effect(() => {
+    posByNode.clear();
+    for (const n of view.nodes) posByNode.set(n.id, { x: n.x, y: n.y });
+  });
+
+  const windowTotal = $derived.by(() => {
+    if (!graph) return 0;
+    return links.filter((l) => {
+      if (team != null && (l.source.team !== team || l.target.team !== team)) {
+        return false;
+      }
+      return l.dates.some(
+        (d) => (!dateStart || d >= dateStart) && (!dateEnd || d <= dateEnd));
+    }).length;
+  });
 
   const color = scaleSequential(interpolateTurbo).domain([0, 1]);
 
@@ -44,10 +68,24 @@
     const g = await fetch("/data/graph.json").then((r) => r.json());
     graph = parseGraph(g);
     maxD = graph.maxGlobalDeg;
+    defaultDateStart = g.dateMin || null;
+    defaultDateEnd = g.dateMax || null;
+    dateStart = defaultDateStart;
+    dateEnd = defaultDateEnd;
   });
 
   function clearSelection() {
     selectedId = null;
+  }
+  function resetView() {
+    minW = 1;
+    maxD = graph ? graph.maxGlobalDeg : 90;
+    team = null;
+    dateStart = defaultDateStart;
+    dateEnd = defaultDateEnd;
+    selectedId = null;
+    params = { ...defaultParams };
+    setTimeout(() => graphCmp?.fitToView(), 80);
   }
   function onGraphSelect(id) {
     selectedId = id;
@@ -73,13 +111,15 @@
   <div id="stats">
     {#if graph}
       {view.nodes.length} players &middot; {view.links.length} edges
-      (of {links.length}) &middot; max degree {maxGlobalDeg}
+      (of {windowTotal}) &middot; max degree {maxGlobalDeg}
     {:else}
       loading…
     {/if}
   </div>
-  <Controls bind:minW bind:maxD bind:team {teams} maxDeg={maxGlobalDeg} />
+  <Controls bind:minW bind:maxD bind:team bind:dateStart bind:dateEnd {teams} maxDeg={maxGlobalDeg} />
   <Search {nodes} {teams} onPick={(d) => (selectedId = d.id)} />
+  <button class="btn" onclick={() => graphCmp?.fitToView()}>Recenter</button>
+  <button class="btn" onclick={resetView}>Reset</button>
   <button class="btn" onclick={() => (showParams = !showParams)}>
     {showParams ? "Hide params" : "Force params"}
   </button>
@@ -103,9 +143,11 @@
 <Hud node={selectedNode} deg={selectedDeg} {partners} {teams} onClear={clearSelection} />
 
 <Graph
+  bind:this={graphCmp}
   viewNodes={view.nodes}
   viewLinks={view.links}
   {maxGlobalDeg}
+  {teams}
   {params}
   {color}
   selectedId={selectedId}

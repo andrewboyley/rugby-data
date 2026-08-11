@@ -21,28 +21,39 @@ class CoOccurrenceGraph:
     def build(self) -> Dict:
         """Compute the graph and return its serializable form."""
         weights: Dict[Tuple[int, int], int] = defaultdict(int)
+        edge_dates: Dict[Tuple[int, int], set] = defaultdict(set)
         appearances: Dict[int, int] = defaultdict(int)
+        player_dates: Dict[int, set] = defaultdict(set)
         team_counts: Dict[int, Counter] = defaultdict(Counter)
 
         for game in self._dataset.games:
+            date = (game.date or "")[:10]
             for competitor in game.competitors:
                 roster = sorted(
                     entry.player_id for entry in competitor.roster)
                 for player_id in roster:
                     appearances[player_id] += 1
                     team_counts[player_id][competitor.team_id] += 1
+                    if date:
+                        player_dates[player_id].add(date)
                 for i in range(len(roster)):
                     for j in range(i + 1, len(roster)):
                         a, b = roster[i], roster[j]
                         if a != b:
                             weights[(a, b)] += 1
+                            if date:
+                                edge_dates[(a, b)].add(date)
 
-        edges = [{"playerA": a, "playerB": b, "weight": w}
-                 for (a, b), w in weights.items()]
+        edges = [{
+            "playerA": a, "playerB": b, "weight": w,
+            "dates": sorted(edge_dates[(a, b)]),
+        } for (a, b), w in weights.items()]
         player_teams = {
             pid: counts.most_common(1)[0][0]
             for pid, counts in team_counts.items()
         }
+        all_dates = sorted({date for dates in player_dates.values()
+                            for date in dates})
 
         return {
             "type": "player-co-occurrence",
@@ -51,8 +62,11 @@ class CoOccurrenceGraph:
             "numEdges": len(edges),
             "players": {str(k): v for k, v in self._dataset.players.items()},
             "appearances": {str(k): v for k, v in appearances.items()},
+            "playerDates": {str(k): sorted(v) for k, v in player_dates.items()},
             "playerTeams": {str(k): v for k, v in player_teams.items()},
             "teams": {str(k): v for k, v in self._dataset.teams.items()},
+            "dateMin": all_dates[0] if all_dates else None,
+            "dateMax": all_dates[-1] if all_dates else None,
             "edges": edges,
         }
 

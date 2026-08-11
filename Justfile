@@ -26,6 +26,10 @@ build: dataset graph
 web:
     cd web && npm ci && npm run build
 
+# Vite dev server with hot reload (serves repo data/ on /data)
+dev:
+    cd web && npm run dev
+
 # Serve the built viewer with Vite (localhost:8787); rebuilds first
 serve: web
     cd web && npm run preview
