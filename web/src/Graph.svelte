@@ -8,7 +8,7 @@
     maxGlobalDeg,
     teams,
     params,
-    color,
+    jerseyColor,
     selectedId,
     onSelect,
     onHover,
@@ -33,6 +33,7 @@
   let clusterCent = new Map(); // team id -> {x, y} centroid in graph space
   let zoomK = 1;
   let tickCount = 0;
+  let viewMaxDeg = 1;
 
   onMount(() => {
     const svg = d3.select(svgEl)
@@ -51,6 +52,7 @@
         zoomK = ev.transform.k;
         root.attr("transform", ev.transform);
         placeClusters();
+        updateLabelLod();
       });
     svg.call(zoom).on("dblclick.zoom", null);
 
@@ -70,6 +72,7 @@
     const ns = viewNodes;
     const ls = viewLinks;
     curMaxW = d3.max(ls, (l) => l.w) || 1;
+    viewMaxDeg = d3.max(ns, (n) => n.deg) || 1;
 
     linkSel = linkGroup.selectAll("line").data(
       ls, (d) => `${d.source.id}-${d.target.id}`);
@@ -85,7 +88,7 @@
       .attr("class", "node")
       .attr("r", 0)
       .merge(nodeSel)
-      .attr("fill", (d) => color(d.deg / (maxGlobalDeg || 1)))
+      .attr("fill", (d) => jerseyColor(d.jersey))
       .attr("stroke", "#0b0e13")
       .attr("stroke-width", 1)
       .attr("r", (d) => 3 + Math.sqrt(d.app) * 1.0)
@@ -100,11 +103,7 @@
     labelSel.exit().remove();
     labelSel = labelSel.enter().append("text").attr("class", "node-label")
       .merge(labelSel)
-      .text((d) => (d.deg > Math.floor(maxGlobalDeg / 3) ? d.name : ""))
-      .style("display",
-        (d) => (d.deg > Math.floor(maxGlobalDeg / 3) ? null : "none"))
-      .attr("x", (d) => (d.x || 0) + 5)
-      .attr("y", (d) => (d.y || 0) + 3);
+      .text((d) => d.name);
 
     curIds = ns.map((n) => n.id);
     curIdIdx = new Map(curIds.map((id, i) => [id, i]));
@@ -112,11 +111,7 @@
     curY = new Float64Array(ns.length);
     elArr = new Array(ns.length);
     nodeSel.each(function (d) { elArr[curIdIdx.get(d.id)] = this; });
-    const labelCut = Math.floor(maxGlobalDeg / 3);
-    labelEls = [];
-    labelSel.each(function (d) {
-      if (d.deg > labelCut) labelEls.push({ el: this, idx: curIdIdx.get(d.id) });
-    });
+    updateLabelLod();
     linkEls = [];
     linkSel.each(function (d) {
       linkEls.push({ el: this, sid: d.source.id, tid: d.target.id });
@@ -184,8 +179,8 @@
         el.setAttribute("x2", curX[b]); el.setAttribute("y2", curY[b]);
       }
       for (const { el, idx } of labelEls) {
-        el.setAttribute("x", curX[idx] + 5);
-        el.setAttribute("y", curY[idx] + 3);
+        el.setAttribute("transform",
+          `translate(${curX[idx] + 5},${curY[idx] + 3}) scale(${1 / zoomK})`);
       }
       const sx = new Map(), sy = new Map(), sc = new Map();
       for (let i = 0; i < n; i++) {
@@ -211,6 +206,33 @@
       if (!c) continue;
       el.setAttribute("transform", `translate(${c.x},${c.y}) scale(${s})`);
     }
+  }
+
+  // Level-of-detail for node labels: show players whose degree exceeds a
+  // cutoff that shrinks as you zoom in, so low-degree names appear when
+  // magnified and vanish when zoomed out. Labels counter-scale to stay
+  // readable at any zoom.
+  function updateLabelLod() {
+    if (!labelSel) return;
+    const maxZoom = 8;
+    const zoom = Math.min(Math.max(zoomK || 1, 0.1), maxZoom);
+    const cut = (viewMaxDeg / 3) * ((maxZoom - zoom) / (maxZoom - 1));
+    const s = 1 / zoom;
+    labelEls = [];
+    labelSel.each(function (d) {
+      const idx = curIdIdx.get(d.id);
+      const show = idx != null && d.deg > cut;
+      if (show) {
+        this.style.display = null;
+        const x = curX[idx] || d.x || 0;
+        const y = curY[idx] || d.y || 0;
+        this.setAttribute("transform",
+          `translate(${x + 5},${y + 3}) scale(${s})`);
+        labelEls.push({ el: this, idx });
+      } else {
+        this.style.display = "none";
+      }
+    });
   }
 
   // re-join when the visible subset changes

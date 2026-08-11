@@ -61,7 +61,8 @@ header h1 { font-size: 16px; margin: 0; font-weight: 600; }
 svg.graph { width: 100vw; height: calc(100vh - 48px); display: block; }
 .node { cursor: pointer; }
 .node-label { font-size: 10px; fill: var(--muted); pointer-events: none;
-              text-shadow: 0 1px 2px #000; }
+              stroke: #11151c; stroke-width: 3px; stroke-linejoin: round;
+              paint-order: stroke; }
 .cluster-label { font-size: 13px; font-weight: 600; fill: #9fb8d8;
                  stroke: #11151c; stroke-width: 3px; paint-order: stroke;
                  pointer-events: none; text-anchor: middle; }

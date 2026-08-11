@@ -8,6 +8,8 @@ export function parseGraph(g) {
     Object.entries(g.appearances || {}).map(([k, v]) => [Number(k), Number(v)]));
   const playerTeams = Object.fromEntries(
     Object.entries(g.playerTeams || {}).map(([k, v]) => [Number(k), Number(v)]));
+  const playerJersey = Object.fromEntries(
+    Object.entries(g.playerJersey || {}).map(([k, v]) => [Number(k), Number(v)]));
   const playerDates = Object.fromEntries(
     Object.entries(g.playerDates || {}).map(([k, v]) => [Number(k), v.slice().sort()]));
 
@@ -15,6 +17,7 @@ export function parseGraph(g) {
     id: Number(id),
     name: players[Number(id)] || String(id),
     team: playerTeams[Number(id)] ?? null,
+    jersey: playerJersey[Number(id)] ?? null,
     app,
     dates: playerDates[Number(id)] || [],
     deg: 0,

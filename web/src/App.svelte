@@ -47,7 +47,9 @@
     }).length;
   });
 
-  const color = scaleSequential(interpolateTurbo).domain([0, 1]);
+  const color = scaleSequential(interpolateTurbo).domain([1, 23]);
+  const jerseyColor = (j) =>
+    j == null ? "#8e8e93" : color(Math.max(1, Math.min(23, j)));
 
   const selectedNode = $derived(
     selectedId != null ? nodes.find((n) => n.id === selectedId) : null);
@@ -130,13 +132,13 @@
 <div id="legend">
   <div><span class="sw" style="background:#5ac8fa"></span>node = player, size = appearances</div>
   <div><span class="sw" style="background:#8e8e93"></span>edge = shared match, width = co-occurrences</div>
-  <div>color: <span style="color:#5ac8fa">■</span> few matches &nbsp; <span style="color:#ff2d55">■</span> many</div>
+  <div>color: <span style="color:{jerseyColor(1)}">■</span> 1 front row &nbsp; <span style="color:{jerseyColor(8)}">■</span> 8 back row &nbsp; <span style="color:{jerseyColor(15)}">■</span> 15 fullback &nbsp; <span style="color:{jerseyColor(23)}">■</span> 23 bench</div>
 </div>
 
 {#if hover}
   <div class="tip" style="left:{hover.x + 14}px; top:{hover.y + 14}px">
     <b>{hover.node.name}</b> &middot; {hover.node.app} appearances,
-    {hover.node.deg} teammates
+    {hover.node.deg} teammates &middot; # {hover.node.jersey ?? "?"}
   </div>
 {/if}
 
@@ -149,7 +151,7 @@
   {maxGlobalDeg}
   {teams}
   {params}
-  {color}
+  {jerseyColor}
   selectedId={selectedId}
   onSelect={onGraphSelect}
   onHover={onHover}

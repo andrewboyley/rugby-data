@@ -25,17 +25,20 @@ class CoOccurrenceGraph:
         appearances: Dict[int, int] = defaultdict(int)
         player_dates: Dict[int, set] = defaultdict(set)
         team_counts: Dict[int, Counter] = defaultdict(Counter)
+        jersey_counts: Dict[int, Counter] = defaultdict(Counter)
 
         for game in self._dataset.games:
             date = (game.date or "")[:10]
             for competitor in game.competitors:
-                roster = sorted(
-                    entry.player_id for entry in competitor.roster)
-                for player_id in roster:
+                for entry in competitor.roster:
+                    player_id = entry.player_id
                     appearances[player_id] += 1
                     team_counts[player_id][competitor.team_id] += 1
+                    jersey_counts[player_id][entry.jersey] += 1
                     if date:
                         player_dates[player_id].add(date)
+                roster = sorted(entry.player_id
+                                for entry in competitor.roster)
                 for i in range(len(roster)):
                     for j in range(i + 1, len(roster)):
                         a, b = roster[i], roster[j]
@@ -52,6 +55,10 @@ class CoOccurrenceGraph:
             pid: counts.most_common(1)[0][0]
             for pid, counts in team_counts.items()
         }
+        player_jersey = {
+            pid: counts.most_common(1)[0][0]
+            for pid, counts in jersey_counts.items()
+        }
         all_dates = sorted({date for dates in player_dates.values()
                             for date in dates})
 
@@ -64,6 +71,7 @@ class CoOccurrenceGraph:
             "appearances": {str(k): v for k, v in appearances.items()},
             "playerDates": {str(k): sorted(v) for k, v in player_dates.items()},
             "playerTeams": {str(k): v for k, v in player_teams.items()},
+            "playerJersey": {str(k): v for k, v in player_jersey.items()},
             "teams": {str(k): v for k, v in self._dataset.teams.items()},
             "dateMin": all_dates[0] if all_dates else None,
             "dateMax": all_dates[-1] if all_dates else None,
