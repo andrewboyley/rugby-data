@@ -1,158 +1,237 @@
 <script>
-  import { onMount } from "svelte";
-  import { scaleSequential, interpolateTurbo } from "d3";
-  import { parseGraph, visibleSubset } from "./lib.js";
-  import Graph from "./Graph.svelte";
-  import Controls from "./Controls.svelte";
-  import Search from "./Search.svelte";
-  import Hud from "./Hud.svelte";
-  import ForcePanel from "./ForcePanel.svelte";
+	import { onMount } from "svelte";
+	import { parseGraph, visibleSubset, edgeKey } from "./lib.js";
+	import Graph from "./Graph.svelte";
+	import Controls from "./Controls.svelte";
+	import Search from "./Search.svelte";
+	import Hud from "./Hud.svelte";
+	import EdgeHud from "./EdgeHud.svelte";
 
-  let graph = $state(null);
-  let minW = $state(1);
-  let maxD = $state(90);
-  let team = $state(null);
-  let dateStart = $state(null);
-  let dateEnd = $state(null);
-  let selectedId = $state(null);
-  let hover = $state(null); // { node, x, y }
-  let showParams = $state(false);
-  const defaultParams = { dist: 120, str: 0.4, chg: -600, coll: 8, decay: 0.04 };
-  let params = $state({ ...defaultParams });
-  let defaultDateStart = $state(null);
-  let defaultDateEnd = $state(null);
-  let graphCmp;
+	let graph = $state(null);
+	let minW = $state(1);
+	let maxW = $state(45);
+	let maxD = $state(90);
+	let team = $state(null);
+	let dateStart = $state(null);
+	let dateEnd = $state(null);
+	let selectedId = $state(null);
+	let selectedEdge = $state(null);
+	let defaultDateStart = $state(null);
+	let defaultDateEnd = $state(null);
+	let gamesByDate = $state(new Map());
+	let edgeColor = $state("none");
+	let graphCmp;
 
-  const nodes = $derived(graph ? graph.nodes : []);
-  const links = $derived(graph ? graph.links : []);
-  const teams = $derived(graph ? graph.teams : {});
-  const maxGlobalDeg = $derived(graph ? graph.maxGlobalDeg : 1);
-  const posByNode = new Map(); // last layout positions by node id (non-reactive)
-  const view = $derived(
-    visibleSubset(nodes, links, minW, maxD, team, dateStart, dateEnd, posByNode));
+	const nodes = $derived(graph ? graph.nodes : []);
+	const links = $derived(graph ? graph.links : []);
+	const teams = $derived(graph ? graph.teams : {});
+	const maxGlobalDeg = $derived(graph ? graph.maxGlobalDeg : 1);
+	const posByNode = new Map(); // last layout positions by node id (non-reactive; written by Graph)
+	const view = $derived(
+		visibleSubset(nodes, links, minW, maxW, maxD, team, dateStart, dateEnd, posByNode),
+	);
 
-  $effect(() => {
-    posByNode.clear();
-    for (const n of view.nodes) posByNode.set(n.id, { x: n.x, y: n.y });
-  });
+	const windowTotal = $derived.by(() => {
+		if (!graph) return 0;
+		return links.filter((l) => {
+			if (team != null && (l.source.team !== team || l.target.team !== team)) {
+				return false;
+			}
+			return l.dates.some((d) => (!dateStart || d >= dateStart) && (!dateEnd || d <= dateEnd));
+		}).length;
+	});
 
-  const windowTotal = $derived.by(() => {
-    if (!graph) return 0;
-    return links.filter((l) => {
-      if (team != null && (l.source.team !== team || l.target.team !== team)) {
-        return false;
-      }
-      return l.dates.some(
-        (d) => (!dateStart || d >= dateStart) && (!dateEnd || d <= dateEnd));
-    }).length;
-  });
+	const TURBO = [
+		"#23171b",
+		"#453390",
+		"#4a52d4",
+		"#4172f3",
+		"#3491f8",
+		"#29afeb",
+		"#25cad4",
+		"#2bdfb7",
+		"#3af099",
+		"#53fa7d",
+		"#73fe64",
+		"#96fa50",
+		"#baf040",
+		"#dae034",
+		"#f3c92b",
+		"#ffae25",
+		"#ff9020",
+		"#ff701a",
+		"#eb5015",
+		"#d0330e",
+		"#b21c06",
+		"#990e00",
+		"#900d00",
+	];
+	const jerseyColor = (j) => (j == null || j < 1 || j > 23 ? "#8e8e93" : TURBO[j - 1]);
+	const selectedNode = $derived(selectedId != null ? nodes.find((n) => n.id === selectedId) : null);
+	const selectedDeg = $derived(
+		selectedId != null ? (view.nodes.find((n) => n.id === selectedId)?.deg ?? 0) : 0,
+	);
 
-  const color = scaleSequential(interpolateTurbo).domain([1, 23]);
-  const jerseyColor = (j) =>
-    j == null ? "#8e8e93" : color(Math.max(1, Math.min(23, j)));
+	const winRates = $derived.by(() => {
+		const m = new Map();
+		if (edgeColor !== "winrate" || !gamesByDate) return m;
+		for (const l of view.links) {
+			if (!l.dates.length) continue;
+			const id = l.source.id;
+			let wins = 0;
+			let n = 0;
+			for (const d of l.dates) {
+				const g = gamesByDate.get(d);
+				if (!g) continue;
+				const side = g.competitors.find((c) => c.roster?.some((p) => p.playerId === id));
+				if (!side) continue;
+				const opp = g.competitors.find((c) => c !== side);
+				if (!opp) continue;
+				n++;
+				if (side.score > opp.score) wins++;
+			}
+			if (n) m.set(edgeKey(l.source.id, l.target.id), wins / n);
+		}
+		return m;
+	});
 
-  const selectedNode = $derived(
-    selectedId != null ? nodes.find((n) => n.id === selectedId) : null);
-  const selectedDeg = $derived(
-    selectedId != null
-      ? (view.nodes.find((n) => n.id === selectedId)?.deg ?? 0)
-      : 0);
+	const partners = $derived.by(() => {
+		if (!selectedNode) return [];
+		return view.links
+			.filter((l) => l.source.id === selectedId || l.target.id === selectedId)
+			.sort((a, b) => b.w - a.w)
+			.slice(0, 12);
+	});
 
-  const partners = $derived.by(() => {
-    if (!selectedNode) return [];
-    return view.links
-      .filter((l) => l.source.id === selectedId || l.target.id === selectedId)
-      .sort((a, b) => b.w - a.w)
-      .slice(0, 12);
-  });
+	onMount(async () => {
+		const text = await fetch("/data/graph.gexf").then((r) => r.text());
+		graph = parseGraph(text);
+		maxD = graph.maxGlobalDeg;
+		defaultDateStart = graph.dateMin || null;
+		defaultDateEnd = graph.dateMax || null;
+		dateStart = defaultDateStart;
+		dateEnd = defaultDateEnd;
+		try {
+			const data = await fetch("/data/dataset.json").then((r) => r.json());
+			const index = new Map();
+			for (const g of data.games || []) {
+				index.set(g.date.slice(0, 10), g);
+			}
+			gamesByDate = index;
+		} catch {
+			/* edge pane falls back to date-only rows */
+		}
+	});
 
-  onMount(async () => {
-    const g = await fetch("/data/graph.json").then((r) => r.json());
-    graph = parseGraph(g);
-    maxD = graph.maxGlobalDeg;
-    defaultDateStart = g.dateMin || null;
-    defaultDateEnd = g.dateMax || null;
-    dateStart = defaultDateStart;
-    dateEnd = defaultDateEnd;
-  });
-
-  function clearSelection() {
-    selectedId = null;
-  }
-  function resetView() {
-    minW = 1;
-    maxD = graph ? graph.maxGlobalDeg : 90;
-    team = null;
-    dateStart = defaultDateStart;
-    dateEnd = defaultDateEnd;
-    selectedId = null;
-    params = { ...defaultParams };
-    setTimeout(() => graphCmp?.fitToView(), 80);
-  }
-  function onGraphSelect(id) {
-    selectedId = id;
-  }
-  function onHover(d, x, y) {
-    hover = d ? { node: d, x, y } : null;
-  }
-  function applyParams(p) {
-    params = p;
-  }
+	function clearSelection() {
+		selectedId = null;
+		selectedEdge = null;
+	}
+	function clearEdge() {
+		selectedEdge = null;
+	}
+	function resetView() {
+		minW = 1;
+		maxW = 45;
+		maxD = graph ? graph.maxGlobalDeg : 90;
+		team = null;
+		dateStart = defaultDateStart;
+		dateEnd = defaultDateEnd;
+		selectedId = null;
+		selectedEdge = null;
+	}
+	function onGraphSelect(id) {
+		selectedId = id;
+		selectedEdge = null;
+	}
+	function onEdgeSelect(edge) {
+		selectedEdge = edge;
+	}
+	function onPartnerHover(id) {
+		graphCmp?.hoverPartner(id);
+	}
+	function onPartnerClick(l) {
+		graphCmp?.selectEdge(l.source.id, l.target.id);
+	}
 </script>
 
 <svelte:window
-  onclick={(ev) => {
-    if (!ev.target.closest(".node, .search-wrap, #hud")) clearSelection();
-  }}
-  onkeydown={(ev) => {
-    if (ev.key === "Escape") clearSelection();
-  }} />
+	onclick={(ev) => {
+		if (!ev.target.closest(".graph-host, .search-wrap, #hud, #edge-hud")) clearSelection();
+	}}
+	onkeydown={(ev) => {
+		if (ev.key === "Escape") clearSelection();
+	}}
+/>
 
 <header>
-  <h1>Rugby co-occurrence graph</h1>
-  <div id="stats">
-    {#if graph}
-      {view.nodes.length} players &middot; {view.links.length} edges
-      (of {windowTotal}) &middot; max degree {maxGlobalDeg}
-    {:else}
-      loading…
-    {/if}
-  </div>
-  <Controls bind:minW bind:maxD bind:team bind:dateStart bind:dateEnd {teams} maxDeg={maxGlobalDeg} />
-  <Search {nodes} {teams} onPick={(d) => (selectedId = d.id)} />
-  <button class="btn" onclick={() => graphCmp?.fitToView()}>Recenter</button>
-  <button class="btn" onclick={resetView}>Reset</button>
-  <button class="btn" onclick={() => (showParams = !showParams)}>
-    {showParams ? "Hide params" : "Force params"}
-  </button>
+	<h1>Rugby co-occurrence graph</h1>
+	<div id="stats">
+		{#if graph}
+			{view.nodes.length} players &middot; {view.links.length} edges (of {windowTotal}) &middot; max
+			degree {maxGlobalDeg}
+		{:else}
+			loading…
+		{/if}
+	</div>
+	<Controls
+		bind:minW
+		bind:maxW
+		bind:maxD
+		bind:team
+		bind:dateStart
+		bind:dateEnd
+		bind:edgeColor
+		{teams}
+		maxDeg={maxGlobalDeg}
+		dateMin={defaultDateStart}
+		dateMax={defaultDateEnd}
+	/>
+	<Search {nodes} {teams} onPick={(d) => (selectedId = d.id)} />
+	<button class="btn" onclick={() => graphCmp?.fitToView()}>Recenter</button>
+	<button class="btn" onclick={resetView}>Reset</button>
 </header>
 
-<ForcePanel {params} show={showParams} onApply={applyParams} />
-
 <div id="legend">
-  <div><span class="sw" style="background:#5ac8fa"></span>node = player, size = appearances</div>
-  <div><span class="sw" style="background:#8e8e93"></span>edge = shared match, width = co-occurrences</div>
-  <div>color: <span style="color:{jerseyColor(1)}">■</span> 1 front row &nbsp; <span style="color:{jerseyColor(8)}">■</span> 8 back row &nbsp; <span style="color:{jerseyColor(15)}">■</span> 15 fullback &nbsp; <span style="color:{jerseyColor(23)}">■</span> 23 bench</div>
+	<div><span class="sw" style="background:#5ac8fa"></span>node = player, size = appearances</div>
+	<div>
+		<span class="sw" style="background:#8e8e93"></span>edge = shared match, width = co-occurrences
+	</div>
+	<div>
+		<span class="sw ramp"></span>edge colour by avg win rate: 0%&nbsp;&nbsp;50%&nbsp;&nbsp;100%
+	</div>
+	<div>
+		color: <span style="color:{jerseyColor(1)}">■</span> 1 front row &nbsp;
+		<span style="color:{jerseyColor(8)}">■</span>
+		8 back row &nbsp; <span style="color:{jerseyColor(15)}">■</span> 15 fullback &nbsp;
+		<span style="color:{jerseyColor(23)}">■</span> 23 bench
+	</div>
 </div>
 
-{#if hover}
-  <div class="tip" style="left:{hover.x + 14}px; top:{hover.y + 14}px">
-    <b>{hover.node.name}</b> &middot; {hover.node.app} appearances,
-    {hover.node.deg} teammates &middot; # {hover.node.jersey ?? "?"}
-  </div>
-{/if}
-
-<Hud node={selectedNode} deg={selectedDeg} {partners} {teams} onClear={clearSelection} />
+<div id="panels">
+	<Hud
+		node={selectedNode}
+		deg={selectedDeg}
+		{partners}
+		{teams}
+		onClear={clearSelection}
+		{onPartnerHover}
+		{onPartnerClick}
+	/>
+	<EdgeHud edge={selectedEdge} {gamesByDate} {teams} onClear={clearEdge} />
+</div>
 
 <Graph
-  bind:this={graphCmp}
-  viewNodes={view.nodes}
-  viewLinks={view.links}
-  {maxGlobalDeg}
-  {teams}
-  {params}
-  {jerseyColor}
-  selectedId={selectedId}
-  onSelect={onGraphSelect}
-  onHover={onHover}
+	bind:this={graphCmp}
+	viewNodes={view.nodes}
+	viewLinks={view.links}
+	{teams}
+	{jerseyColor}
+	prevPos={posByNode}
+	{selectedId}
+	{selectedEdge}
+	{edgeColor}
+	{winRates}
+	onSelect={onGraphSelect}
+	{onEdgeSelect}
 />

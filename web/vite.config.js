@@ -14,7 +14,12 @@ function repoData() {
     const target = path.join(repoRoot, "data", req.url);
     const root = path.join(repoRoot, "data");
     if (existsSync(target) && path.resolve(target).startsWith(root)) {
-      res.setHeader("Content-Type", "application/json");
+      const ext = path.extname(target).toLowerCase();
+      if (ext === ".gexf" || ext === ".xml") {
+        res.setHeader("Content-Type", "application/xml");
+      } else {
+        res.setHeader("Content-Type", "application/json");
+      }
       createReadStream(target).pipe(res);
     } else {
       next();

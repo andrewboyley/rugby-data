@@ -1,7 +1,7 @@
 """Progress reporting for long-running builds."""
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Self
 
 from rich.progress import (
     BarColumn,
@@ -39,9 +39,9 @@ class RichProgressBar(BuildListener):
             TimeElapsedColumn(),
             TimeRemainingColumn(),
         )
-        self._task: Optional[int] = None
+        self._task: int | None = None
 
-    def __enter__(self) -> "RichProgressBar":
+    def __enter__(self) -> Self:
         self._progress.start()
         return self
 
@@ -50,12 +50,13 @@ class RichProgressBar(BuildListener):
 
     def task_started(self, total: int) -> None:
         self._task = self._progress.add_task(
-            "Fetching games", total=total, activity="starting...")
+            "Fetching games", total=total, activity="starting..."
+        )
 
     def event_fetched(self, index, label, activity, complete) -> None:
         self._progress.update(
-            self._task, advance=1, description=label,
-            activity=f"fetching: {activity}")
+            self._task, advance=1, description=label, activity=f"fetching: {activity}"
+        )
 
     def task_finished(self) -> None:
         pass

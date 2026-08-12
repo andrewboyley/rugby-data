@@ -27,7 +27,7 @@ def build_dataset(
     builder = DatasetBuilder(api, cache, dataset, dataset_path)
 
     print("== South Africa international rugby dataset builder ==")
-    print(f"  Team:     South Africa (id 5)")
+    print("  Team:     South Africa (id 5)")
     print(f"  Output:   {dataset_path}")
     print(f"  Cache:    {cache_path} ({len(cache)} entries loaded)")
     print()
@@ -56,25 +56,31 @@ def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
         prog="rugby-composition-predictor",
         description="Build a dataset and co-occurrence graph of "
-                    "South African international rugby matches.",
+        "South African international rugby matches.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
     dataset_cmd = sub.add_parser("dataset", help="build dataset.json")
     dataset_cmd.add_argument(
-        "--output", default=DEFAULT_DATASET_PATH,
-        help="output path (default: %(default)s)")
+        "--output",
+        default=DEFAULT_DATASET_PATH,
+        help="output path (default: %(default)s)",
+    )
     dataset_cmd.add_argument(
-        "--cache", default=DEFAULT_CACHE_PATH,
-        help="cache path (default: %(default)s)")
+        "--cache", default=DEFAULT_CACHE_PATH, help="cache path (default: %(default)s)"
+    )
 
     graph_cmd = sub.add_parser("graph", help="build graph.json")
     graph_cmd.add_argument(
-        "--input", default=DEFAULT_DATASET_PATH,
-        help="dataset input (default: %(default)s)")
+        "--input",
+        default=DEFAULT_DATASET_PATH,
+        help="dataset input (default: %(default)s)",
+    )
     graph_cmd.add_argument(
-        "--output", default=DEFAULT_GRAPH_PATH,
-        help="graph output (default: %(default)s)")
+        "--output",
+        default=DEFAULT_GRAPH_PATH,
+        help="graph output (default: %(default)s)",
+    )
 
     args = parser.parse_args(argv)
 

@@ -1,10 +1,8 @@
 """Orchestrates fetching a rugby dataset from the ESPN CORE API."""
 
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional
 
 from .api import EspnApi, event_id_from_url
 from .cache import ApiCache
@@ -42,14 +40,14 @@ class DatasetBuilder:
         self._save_every = save_every
         self._requests = 0
 
-    def build(self, listener: Optional[BuildListener] = None) -> None:
+    def build(self, listener: BuildListener | None = None) -> None:
         """Fetch all pending events and save the completed dataset."""
         event_urls = self._discover_event_urls()
-        pending = [u for u in event_urls if not self._cache.is_processed(
-            event_id_from_url(u))]
+        pending = [
+            u for u in event_urls if not self._cache.is_processed(event_id_from_url(u))
+        ]
 
-        print(f"[1/2] Found {len(event_urls)} events, "
-              f"{len(pending)} to fetch\n")
+        print(f"[1/2] Found {len(event_urls)} events, {len(pending)} to fetch\n")
 
         if listener:
             listener.task_started(len(pending))
@@ -77,13 +75,13 @@ class DatasetBuilder:
 
     # ---- private helpers ----
 
-    def _discover_event_urls(self) -> List[str]:
+    def _discover_event_urls(self) -> list[str]:
         urls = set()
         for year in self._years:
             urls.update(self._api.events_for_year(self._team_id, year))
         return sorted(urls)
 
-    def _fetch_game(self, event_url: str) -> Optional[Game]:
+    def _fetch_game(self, event_url: str) -> Game | None:
         event = self._api.get(event_url)
         competitions = event.get("competitions", [])
         if not competitions:
@@ -96,12 +94,14 @@ class DatasetBuilder:
         for competitor in competition.get("competitors", []):
             team_id = int(competitor["id"])
             self._register_team(team_id, competitor["team"]["$ref"])
-            competitors.append(Competitor(
-                team_id=team_id,
-                home=competitor.get("homeAway") == "home",
-                score=self._fetch_score(competitor),
-                roster=self._fetch_roster(competitor),
-            ))
+            competitors.append(
+                Competitor(
+                    team_id=team_id,
+                    home=competitor.get("homeAway") == "home",
+                    score=self._fetch_score(competitor),
+                    roster=self._fetch_roster(competitor),
+                )
+            )
         return Game(
             event_id=int(event["id"]),
             date=event.get("date"),
@@ -112,11 +112,15 @@ class DatasetBuilder:
         if self._dataset.team_name(team_id):
             return
         team = self._api.get(team_ref)
-        name = (team.get("displayName") or team.get("name")
-                or team.get("slug") or str(team_id))
+        name = (
+            team.get("displayName")
+            or team.get("name")
+            or team.get("slug")
+            or str(team_id)
+        )
         self._dataset.register_team(team_id, name)
 
-    def _fetch_score(self, competitor: dict) -> Optional[int]:
+    def _fetch_score(self, competitor: dict) -> int | None:
         score_ref = competitor.get("score", {}).get("$ref")
         if not score_ref:
             return None
@@ -126,7 +130,7 @@ class DatasetBuilder:
         except (TypeError, ValueError):
             return None
 
-    def _fetch_roster(self, competitor: dict) -> List[RosterEntry]:
+    def _fetch_roster(self, competitor: dict) -> list[RosterEntry]:
         roster_ref = competitor.get("roster", {}).get("$ref")
         if not roster_ref:
             return []
@@ -135,34 +139,39 @@ class DatasetBuilder:
         for entry in entries:
             player_id = int(entry["playerId"])
             self._register_player(player_id, entry["athlete"]["$ref"])
-            roster.append(RosterEntry(
-                player_id=player_id,
-                jersey=int(entry["jersey"]) if entry["jersey"].isdigit()
-                       else entry["jersey"],
-            ))
+            roster.append(
+                RosterEntry(
+                    player_id=player_id,
+                    jersey=self._parse_jersey(entry["jersey"]),
+                )
+            )
         return roster
+
+    def _parse_jersey(self, value) -> int:
+        return int(value) if str(value).isdigit() else value
 
     def _register_player(self, player_id: int, athlete_ref: str) -> None:
         if self._dataset.player_name(player_id):
             return
         athlete = self._api.get(athlete_ref)
-        name = (athlete.get("displayName") or athlete.get("fullName")
-                or str(player_id))
+        name = athlete.get("displayName") or athlete.get("fullName") or str(player_id)
         self._dataset.register_player(player_id, name)
 
-    def _report(self, listener, index: int, game: Optional[Game]) -> None:
+    def _report(self, listener, index: int, game: Game | None) -> None:
         if not listener or game is None:
             return
         action, _ = self._api.activity.snapshot()
         label = f"{game.date[:10]} " + " vs ".join(
             self._dataset.team_name(c.team_id) or f"team{c.team_id}"
-            for c in game.competitors)
+            for c in game.competitors
+        )
         listener.event_fetched(index, label, action, game.is_complete())
 
     def _print_summary(self, fetched: int, elapsed: float) -> None:
         _, requests = self._api.activity.snapshot()
-        print(f"[2/2] Done in {elapsed:.0f}s. "
-              f"Wrote {len(self._dataset.games)} games "
-              f"to {self._output_path}")
-        print(f"      API requests: {requests} "
-              f"({len(self._cache)} cache entries)")
+        print(
+            f"[2/2] Done in {elapsed:.0f}s. "
+            f"Wrote {len(self._dataset.games)} games "
+            f"to {self._output_path}"
+        )
+        print(f"      API requests: {requests} ({len(self._cache)} cache entries)")

@@ -34,13 +34,16 @@ class ApiCache:
             self._recover_corrupt(e)
             return {}, set()
         processed = data.pop(CACHE_PROCESSED_KEY, [])
-        return data, set(int(e) for e in processed)
+        return data, {int(e) for e in processed}
 
     def _recover_corrupt(self, error: json.JSONDecodeError) -> None:
         backup = self._path.with_suffix(self._path.suffix + ".corrupt")
         os.replace(self._path, backup)
-        print(f"[!] {self._path} corrupt ({error}); "
-              f"backed up to {backup}, starting fresh", file=sys.stderr)
+        print(
+            f"[!] {self._path} corrupt ({error}); "
+            f"backed up to {backup}, starting fresh",
+            file=sys.stderr,
+        )
 
     # ---- cache access ----
 

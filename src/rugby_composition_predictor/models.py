@@ -1,7 +1,6 @@
 """Domain models for rugby matches."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 
 @dataclass
@@ -14,8 +13,8 @@ class RosterEntry:
 class Competitor:
     team_id: int
     home: bool
-    score: Optional[int]
-    roster: List[RosterEntry] = field(default_factory=list)
+    score: int | None
+    roster: list[RosterEntry] = field(default_factory=list)
 
     def is_complete(self) -> bool:
         return bool(self.roster) and self.score is not None
@@ -24,13 +23,12 @@ class Competitor:
 @dataclass
 class Game:
     event_id: int
-    date: Optional[str]
-    competitors: List[Competitor] = field(default_factory=list)
+    date: str | None
+    competitors: list[Competitor] = field(default_factory=list)
 
     def is_complete(self) -> bool:
-        return (
-            len(self.competitors) == 2
-            and all(c.is_complete() for c in self.competitors)
+        return len(self.competitors) == 2 and all(
+            c.is_complete() for c in self.competitors
         )
 
 

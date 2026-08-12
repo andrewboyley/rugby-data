@@ -35,11 +35,16 @@ cd web && npm run preview             # serves dist/ + repo data/ on :8787
 ```
 
 Nodes are players (size = appearances, colour = modal jersey number), edges
-connect players who shared a match (width/opacity = co-occurrence count). Filter by
-min shared matches, max degree or team; click a node to focus its teammates;
-use the search box to jump to a player, the Recenter button to zoom the view
-to the currently filtered players, and the force-parameter panel to tune the
-layout.
+connect players who shared a match (width/opacity = co-occurrence count).
+Rendering and interaction use [sigma.js](https://www.sigmajs.org) on a
+[graphology](https://graphology.github.io) graph, with the
+ForceAtlas2 layout (`graphology-layout-forceatlas2`) running in a web worker
+with stock settings. Filter by min shared matches, max degree, team or date
+window; click a node to focus its teammates; use the search box to jump to a
+player, or the Recenter button to zoom the view to the currently filtered
+players. Team cluster labels and the jersey
+colour ramp are the only custom pieces; everything else uses stock sigma
+defaults.
 
 ## Layout
 

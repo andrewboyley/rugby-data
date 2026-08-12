@@ -1,318 +1,462 @@
 <script>
-  import { onMount } from "svelte";
-  import * as d3 from "d3";
+	import { onDestroy } from "svelte";
+	import Sigma from "sigma";
+	import Graph from "graphology";
+	import { fitViewportToNodes } from "@sigma/utils";
+	import forceAtlas2 from "graphology-layout-forceatlas2";
+	import FA2Layout from "graphology-layout-forceatlas2/worker";
+	import { NodeBorderProgram, createNodeBorderProgram } from "@sigma/node-border";
+	import { edgeKey, winRateColor } from "./lib.js";
 
-  let {
-    viewNodes,
-    viewLinks,
-    maxGlobalDeg,
-    teams,
-    params,
-    jerseyColor,
-    selectedId,
-    onSelect,
-    onHover,
-  } = $props();
+	const ActiveBorderProgram = createNodeBorderProgram({
+		borders: [
+			{ color: { value: "#000000" }, size: { value: 2.5, mode: "pixels" } },
+			{ color: { value: "#ffffff" }, size: { value: 5, mode: "pixels" } },
+			{ color: { value: "#000000" }, size: { value: 2.5, mode: "pixels" } },
+			{ color: { attribute: "color" }, size: { fill: true } },
+		],
+	});
 
-  let svgEl;
-  let zoom, root, linkGroup, nodeGroup, labelGroup, clusterGroup;
-  let nodeSel, linkSel, labelSel, clusterSel;
-  let curMaxW = 1;
-  let width = window.innerWidth;
-  let height = window.innerHeight - 48;
-  let worker;
-  let curIds = [];
-  let curX = new Float64Array(0);
-  let curY = new Float64Array(0);
-  let curIdIdx = new Map();
-  let elArr = [];
-  let labelEls = [];
-  let linkEls = [];
-  let clusterEls = [];
-  let teamArr = new Int16Array(0);
-  let clusterCent = new Map(); // team id -> {x, y} centroid in graph space
-  let zoomK = 1;
-  let tickCount = 0;
-  let viewMaxDeg = 1;
+	let {
+		viewNodes,
+		viewLinks,
+		teams,
+		jerseyColor,
+		prevPos,
+		selectedId,
+		selectedEdge,
+		onSelect,
+		onEdgeSelect = () => {},
+		edgeColor = "none",
+		winRates = new Map(),
+	} = $props();
 
-  onMount(() => {
-    const svg = d3.select(svgEl)
-      .attr("width", width)
-      .attr("height", height);
-    root = svg.append("g").attr("class", "root");
-    linkGroup = root.append("g");
-    nodeGroup = root.append("g");
-    labelGroup = root.append("g");
-    clusterGroup = root.append("g").attr("class", "cluster");
+	let host;
+	let sigma = null;
+	let graph = null;
+	let layout = null;
+	let clusterLayer = null;
+	const clusterDivs = new Map();
 
-    zoom = d3.zoom()
-      .scaleExtent([0.1, 8])
-      .filter((ev) => !ev.target.classList.contains("node"))
-      .on("zoom", (ev) => {
-        zoomK = ev.transform.k;
-        root.attr("transform", ev.transform);
-        placeClusters();
-        updateLabelLod();
-      });
-    svg.call(zoom).on("dblclick.zoom", null);
+	let hoveredId = null;
+	let hoverNeighbors = new Set();
+	let hoveredOther = null;
+	let pinnedId = null;
+	let pinnedNeighbors = new Set();
+	let hoveredEdge = null;
+	let pinnedEdge = null;
+	let tip = $state({ x: 0, y: 0, visible: false, text: "" });
 
-    worker = new Worker(new URL("./sim-worker.js", import.meta.url),
-      { type: "module" });
-    worker.onmessage = (e) => applyTick(e.data);
+	const focusId = () => hoveredId ?? pinnedId;
+	const focusNeighbors = () => (hoveredId != null ? hoverNeighbors : pinnedNeighbors);
 
-    window.addEventListener("resize", onResize);
-    render();
-    return () => {
-      worker.terminate();
-      window.removeEventListener("resize", onResize);
-    };
-  });
+	function isActiveEdge(edge) {
+		if (pinnedId == null) return false;
+		const [a, b] = graph.extremities(edge);
+		return (a === pinnedId && pinnedNeighbors.has(b)) || (b === pinnedId && pinnedNeighbors.has(a));
+	}
 
-  function render() {
-    const ns = viewNodes;
-    const ls = viewLinks;
-    curMaxW = d3.max(ls, (l) => l.w) || 1;
-    viewMaxDeg = d3.max(ns, (n) => n.deg) || 1;
+	function nodeReducer(node, data) {
+		const res = { ...data };
+		const f = focusId();
+		const isHovered = node === hoveredId || node === hoveredOther;
+		const isActive = node === f;
+		const isSecondary = f != null && focusNeighbors().has(node);
 
-    linkSel = linkGroup.selectAll("line").data(
-      ls, (d) => `${d.source.id}-${d.target.id}`);
-    linkSel.exit().remove();
-    linkSel = linkSel.enter().append("line").attr("stroke", "#5b6472")
-      .merge(linkSel)
-      .attr("stroke-width", (d) => 0.4 + 4.6 * Math.sqrt(d.w / curMaxW))
-      .attr("stroke-opacity", 0.5);
+		res.isActive = isActive;
+		res.isSecondary = isSecondary;
+		res.isHovered = isHovered;
 
-    nodeSel = nodeGroup.selectAll("circle").data(ns, (d) => d.id);
-    nodeSel.exit().remove();
-    nodeSel = nodeSel.enter().append("circle")
-      .attr("class", "node")
-      .attr("r", 0)
-      .merge(nodeSel)
-      .attr("fill", (d) => jerseyColor(d.jersey))
-      .attr("stroke", "#0b0e13")
-      .attr("stroke-width", 1)
-      .attr("r", (d) => 3 + Math.sqrt(d.app) * 1.0)
-      .attr("cx", (d) => d.x || 0)
-      .attr("cy", (d) => d.y || 0)
-      .on("mouseover", (ev, d) => onHover(d, ev.clientX, ev.clientY))
-      .on("mousemove", (ev, d) => onHover(d, ev.clientX, ev.clientY))
-      .on("mouseout", () => onHover(null))
-      .on("click", (ev, d) => { ev.stopPropagation(); onSelect(d.id); });
+		if (f != null) {
+			if (isActive) {
+				res.type = "activeBorder";
+				res.forceLabel = true;
+			} else if (hoveredOther != null && node === hoveredOther) {
+				res.type = "border";
+				res.borderColor = "#8ab4f8";
+				res.forceLabel = true;
+				res.color = "#8ab4f8";
+			} else if (isSecondary) {
+				res.type = "border";
+				res.borderColor = "#000000";
+				res.forceLabel = true;
+			} else {
+				res.type = "border";
+				res.borderColor = "#000000";
+				res.label = "";
+				res.color = "#39434f";
+			}
+		} else {
+			res.type = "border";
+			res.borderColor = "#000000";
+			if (isHovered) {
+				res.forceLabel = true;
+			}
+		}
+		return res;
+	}
 
-    labelSel = labelGroup.selectAll("text").data(ns, (d) => d.id);
-    labelSel.exit().remove();
-    labelSel = labelSel.enter().append("text").attr("class", "node-label")
-      .merge(labelSel)
-      .text((d) => d.name);
+	function edgeReducer(edge, data) {
+		const res = { ...data };
+		if (pinnedId != null) {
+			const [a, b] = graph.extremities(edge);
+			const joinsPinned =
+				(a === pinnedId && pinnedNeighbors.has(b)) || (b === pinnedId && pinnedNeighbors.has(a));
+			const joinsHoveredOther =
+				hoveredOther != null &&
+				a !== b &&
+				((a === pinnedId && b === hoveredOther) || (b === pinnedId && a === hoveredOther));
+			if (edge === pinnedEdge) {
+				res.color = "#7db4ff";
+				res.size = (res.size || 0.5) * 1.6;
+			} else if (edge === hoveredEdge) {
+				res.color = "#7db4ff";
+			} else if (joinsHoveredOther) {
+				res.color = "#8ab4f8";
+			} else if (joinsPinned) {
+				// keep global edge style
+			} else {
+				res.hidden = true;
+			}
+			return res;
+		}
+		if (pinnedEdge != null && edge === pinnedEdge) {
+			res.color = "#7db4ff";
+			return res;
+		}
+		if (pinnedEdge != null) {
+			res.hidden = true;
+			return res;
+		}
+		if (pinnedEdge != null && edge === pinnedEdge) {
+			res.color = "#7db4ff";
+			return res;
+		}
+		if (hoveredEdge != null && edge === hoveredEdge) {
+			res.size = (res.size || 0.5) * 1.6;
+		}
+		const f = focusId();
+		if (f == null) return { ...data };
+		const [a, b] = graph.extremities(edge);
+		const adjacent = (a === f && focusNeighbors().has(b)) || (b === f && focusNeighbors().has(a));
+		if (!adjacent) res.hidden = true;
+		return res;
+	}
 
-    curIds = ns.map((n) => n.id);
-    curIdIdx = new Map(curIds.map((id, i) => [id, i]));
-    curX = new Float64Array(ns.length);
-    curY = new Float64Array(ns.length);
-    elArr = new Array(ns.length);
-    nodeSel.each(function (d) { elArr[curIdIdx.get(d.id)] = this; });
-    updateLabelLod();
-    linkEls = [];
-    linkSel.each(function (d) {
-      linkEls.push({ el: this, sid: d.source.id, tid: d.target.id });
-    });
+	// ---- graph building ----
+	function nodeSize(n, maxApp) {
+		return 2.5 + 5 * Math.sqrt((n.app || 0) / maxApp);
+	}
+	function edgeSize(w, maxW) {
+		return 0.4 + 4.6 * Math.sqrt(w / maxW);
+	}
 
-    // team cluster labels at the centroid of each team's visible nodes
-    teamArr = new Int16Array(ns.length);
-    const tsumX = new Map(), tsumY = new Map(), tcount = new Map();
-    for (let i = 0; i < ns.length; i++) {
-      const t = ns[i].team;
-      teamArr[i] = t == null ? -1 : t;
-      if (t == null) continue;
-      tsumX.set(t, (tsumX.get(t) || 0) + (ns[i].x || 0));
-      tsumY.set(t, (tsumY.get(t) || 0) + (ns[i].y || 0));
-      tcount.set(t, (tcount.get(t) || 0) + 1);
-    }
-    const teamDatums = [...tcount]
-      .filter(([, c]) => c >= 2)
-      .map(([tid, c]) => ({
-        tid,
-        name: teams[tid] || `team ${tid}`,
-        cx: (tsumX.get(tid) || 0) / c,
-        cy: (tsumY.get(tid) || 0) / c,
-      }));
-    clusterCent.clear();
-    for (const d of teamDatums) clusterCent.set(d.tid, { x: d.cx, y: d.cy });
-    clusterSel = clusterGroup.selectAll("text").data(teamDatums, (d) => d.tid);
-    clusterSel.exit().remove();
-    clusterSel = clusterSel.enter().append("text").attr("class", "cluster-label")
-      .attr("dy", "0.35em")
-      .merge(clusterSel)
-      .text((d) => d.name);
-    clusterEls = [];
-    clusterSel.each(function (d) { clusterEls.push({ el: this, tid: d.tid }); });
-    placeClusters();
+	function buildGraph(nodes, links) {
+		const g = new Graph();
+		const maxApp = Math.max(1, ...nodes.map((n) => n.app || 0));
+		const maxW = Math.max(1, ...links.map((l) => l.w));
+		for (const n of nodes) {
+			const p = prevPos?.get(n.id);
+			g.addNode(String(n.id), {
+				label: n.name,
+				color: jerseyColor(n.jersey),
+				type: "border",
+				borderColor: "#000000",
+				size: nodeSize(n, maxApp),
+				x: p?.x ?? Math.random() * 4 - 2,
+				y: p?.y ?? Math.random() * 4 - 2,
+				name: n.name,
+				team: n.team,
+				jersey: n.jersey,
+				app: n.app,
+				deg: n.deg,
+			});
+		}
+		for (const l of links) {
+			const wr = edgeColor === "winrate" ? winRates.get(edgeKey(l.source.id, l.target.id)) : null;
+			g.addEdge(String(l.source.id), String(l.target.id), {
+				weight: l.w,
+				size: edgeSize(l.w, maxW),
+				w: l.w,
+				dates: l.dates || [],
+				...(wr != null ? { color: winRateColor(wr) } : {}),
+			});
+		}
+		return g;
+	}
 
-    if (!worker) return;
-    worker.postMessage({
-      type: "update",
-      nodes: ns.map((n) => ({ id: n.id, app: n.app, x: n.x, y: n.y })),
-      links: ls.map((l) => ({ source: l.source.id, target: l.target.id, w: l.w })),
-      curMaxW,
-      dist: params.dist, str: params.str, chg: params.chg,
-      coll: params.coll, decay: params.decay,
-      alpha: 0.15,
-    });
-  }
+	function createSigma() {
+		const s = new Sigma(graph, host, {
+			labelColor: { color: "#d6dbe2" },
+			defaultEdgeColor: "#5a6572",
+			enableEdgeEvents: true,
+			nodeProgramClasses: {
+				border: NodeBorderProgram,
+				activeBorder: ActiveBorderProgram,
+			},
+			defaultDrawNodeLabel: (context, data, settings) => {
+				if (!data.label) return;
+				const fontSize = settings.labelSize;
+				const font = settings.labelFont;
+				context.font = `${settings.labelWeight || ""} ${fontSize}px ${font}`;
 
-  function applyTick(msg) {
-    if (msg.type !== "tick") return;
-    const pos = msg.pos;
-    const n = curIds.length;
-    for (let i = 0; i < n; i++) {
-      const x = pos[i * 2], y = pos[i * 2 + 1];
-      curX[i] = x;
-      curY[i] = y;
-      const el = elArr[i];
-      if (el) { el.setAttribute("cx", x); el.setAttribute("cy", y); }
-    }
-    if (++tickCount % 3 === 0) {
-      for (const { el, sid, tid } of linkEls) {
-        const a = curIdIdx.get(sid), b = curIdIdx.get(tid);
-        if (a == null || b == null) continue;
-        el.setAttribute("x1", curX[a]); el.setAttribute("y1", curY[a]);
-        el.setAttribute("x2", curX[b]); el.setAttribute("y2", curY[b]);
-      }
-      for (const { el, idx } of labelEls) {
-        el.setAttribute("transform",
-          `translate(${curX[idx] + 5},${curY[idx] + 3}) scale(${1 / zoomK})`);
-      }
-      const sx = new Map(), sy = new Map(), sc = new Map();
-      for (let i = 0; i < n; i++) {
-        const t = teamArr[i];
-        if (t < 0) continue;
-        sx.set(t, (sx.get(t) || 0) + curX[i]);
-        sy.set(t, (sy.get(t) || 0) + curY[i]);
-        sc.set(t, (sc.get(t) || 0) + 1);
-      }
-      clusterCent.clear();
-      for (const { tid } of clusterEls) {
-        const c = sc.get(tid);
-        if (c) clusterCent.set(tid, { x: sx.get(tid) / c, y: sy.get(tid) / c });
-      }
-      placeClusters();
-    }
-  }
+				const x = data.x + data.size + 4;
+				const y = data.y + fontSize / 3;
 
-  function placeClusters() {
-    const s = 1 / zoomK;
-    for (const { el, tid } of clusterEls) {
-      const c = clusterCent.get(tid);
-      if (!c) continue;
-      el.setAttribute("transform", `translate(${c.x},${c.y}) scale(${s})`);
-    }
-  }
+				context.strokeStyle = "#000000";
+				context.lineWidth = 3;
+				context.strokeText(data.label, x, y);
 
-  // Level-of-detail for node labels: show players whose degree exceeds a
-  // cutoff that shrinks as you zoom in, so low-degree names appear when
-  // magnified and vanish when zoomed out. Labels counter-scale to stay
-  // readable at any zoom.
-  function updateLabelLod() {
-    if (!labelSel) return;
-    const maxZoom = 8;
-    const zoom = Math.min(Math.max(zoomK || 1, 0.1), maxZoom);
-    const cut = (viewMaxDeg / 3) * ((maxZoom - zoom) / (maxZoom - 1));
-    const s = 1 / zoom;
-    labelEls = [];
-    labelSel.each(function (d) {
-      const idx = curIdIdx.get(d.id);
-      const show = idx != null && d.deg > cut;
-      if (show) {
-        this.style.display = null;
-        const x = curX[idx] || d.x || 0;
-        const y = curY[idx] || d.y || 0;
-        this.setAttribute("transform",
-          `translate(${x + 5},${y + 3}) scale(${s})`);
-        labelEls.push({ el: this, idx });
-      } else {
-        this.style.display = "none";
-      }
-    });
-  }
+				context.fillStyle = data.isHovered ? "#000000" : settings.labelColor.color;
+				context.fillText(data.label, x, y);
+			},
+			nodeReducer,
+			edgeReducer,
+		});
+		window.__sigma = s;
+		window.__graph = graph;
 
-  // re-join when the visible subset changes
-  $effect(() => {
-    if (worker) render();
-  });
+		s.on("clickNode", ({ node }) => {
+			const clickedId = Number(node);
+			if (selectedId != null) {
+				if (clickedId === Number(selectedId)) {
+					onSelect(null);
+					return;
+				}
+				const edge =
+					graph.edge(String(selectedId), String(clickedId)) ??
+					graph.edge(String(clickedId), String(selectedId));
+				if (edge != null) {
+					if (selectedEdge?.key === edge) {
+						onSelect(clickedId);
+					} else {
+						const s_ext = graph.extremities(edge);
+						const attrs = graph.getEdgeAttributes(edge);
+						onEdgeSelect({
+							key: edge,
+							a: graph.getNodeAttribute(s_ext[0], "name"),
+							b: graph.getNodeAttribute(s_ext[1], "name"),
+							team: graph.getNodeAttribute(s_ext[0], "team"),
+							w: attrs.w,
+							dates: attrs.dates || [],
+						});
+					}
+					return;
+				}
+			}
+			onSelect(clickedId);
+		});
+		s.on("clickStage", () => onSelect(null));
+		s.on("clickEdge", ({ edge }) => {
+			if (!isActiveEdge(edge)) return;
+			const attrs = graph.getEdgeAttributes(edge);
+			const [a, b] = graph.extremities(edge);
+			onEdgeSelect({
+				key: edge,
+				a: graph.getNodeAttribute(String(a), "name"),
+				b: graph.getNodeAttribute(String(b), "name"),
+				team: graph.getNodeAttribute(String(a), "team"),
+				w: attrs.w,
+				dates: attrs.dates || [],
+			});
+		});
+		s.on("enterEdge", ({ edge }) => {
+			hoveredEdge = edge;
+			s.refresh({ skipIndexation: true });
+		});
+		s.on("leaveEdge", () => {
+			hoveredEdge = null;
+			s.refresh({ skipIndexation: true });
+		});
+		s.on("enterNode", ({ node, event }) => {
+			if (pinnedId != null) {
+				hoveredOther = node;
+				const e = graph.edge(pinnedId, node);
+				if (e != null) {
+					tip = {
+						x: event.x,
+						y: event.y,
+						visible: true,
+						text: `${graph.getEdgeAttribute(e, "w")} shared games`,
+					};
+				}
+			} else {
+				hoveredId = node;
+				hoverNeighbors = new Set(graph.neighbors(node));
+			}
+			s.refresh({ skipIndexation: true });
+			window.__hover = { hoveredId, hoveredOther, neighbors: hoverNeighbors.size };
+		});
+		s.on("leaveNode", () => {
+			hoveredId = null;
+			hoveredOther = null;
+			hoverNeighbors = new Set();
+			tip = { x: 0, y: 0, visible: false, text: "" };
+			s.refresh({ skipIndexation: true });
+			window.__hover = { hoveredId: null, neighbors: 0 };
+		});
+		s.on("afterRender", () => updateClusters());
 
-  // push force-parameter changes to the worker
-  $effect(() => {
-    if (!worker) return;
-    worker.postMessage({
-      type: "params",
-      dist: params.dist, str: params.str, chg: params.chg,
-      coll: params.coll, decay: params.decay,
-    });
-  });
+		clusterLayer = s.createLayer("clusters", "div");
+		clusterLayer.style.pointerEvents = "none";
+		return s;
+	}
 
-  // highlight a selected player and dim the rest
-  $effect(() => {
-    if (!nodeSel) return;
-    const id = selectedId;
-    if (id == null) {
-      nodeSel.classed("dim", false)
-        .attr("stroke", "#0b0e13").attr("stroke-width", 1);
-      linkSel.classed("dim", false)
-        .attr("stroke", "#5b6472")
-        .attr("stroke-width", (d) => 0.4 + 4.6 * Math.sqrt(d.w / (curMaxW || 1)))
-        .attr("stroke-opacity", 0.5);
-      return;
-    }
-    const sel = viewNodes.find((n) => n.id === id);
-    if (!sel) return;
-    const keep = new Set([id]);
-    for (const l of viewLinks) {
-      if (l.source.id === id) keep.add(l.target.id);
-      if (l.target.id === id) keep.add(l.source.id);
-    }
-    nodeSel.classed("dim", true).attr("stroke", "#0b0e13")
-      .attr("stroke-width", 1);
-    linkSel.classed("dim", true);
-    nodeSel.filter((n) => keep.has(n.id)).classed("dim", false);
-    linkSel.filter((l) => keep.has(l.source.id) && keep.has(l.target.id))
-      .classed("dim", false)
-      .attr("stroke", "#ffd166")
-      .attr("stroke-width", (l) => 1 + 5 * Math.sqrt(l.w / (curMaxW || 1)))
-      .attr("stroke-opacity", 0.9);
-    nodeSel.filter((n) => n.id === id)
-      .attr("stroke", "#ffd166").attr("stroke-width", 2.5);
-  });
+	// ---- cluster labels (HTML overlay) ----
+	function updateClusters() {
+		if (!sigma || !clusterLayer || !graph) return;
+		const groups = new Map();
+		graph.forEachNode((key, a) => {
+			if (a.team == null) return;
+			let g = groups.get(a.team);
+			if (!g) {
+				g = { sx: 0, sy: 0, n: 0, name: teams[a.team] || `team ${a.team}` };
+				groups.set(a.team, g);
+			}
+			g.sx += a.x;
+			g.sy += a.y;
+			g.n++;
+		});
+		for (const [tid] of groups) {
+			if (!clusterDivs.has(tid)) {
+				const d = document.createElement("div");
+				d.className = "sigma-cluster";
+				clusterLayer.appendChild(d);
+				clusterDivs.set(tid, d);
+			}
+		}
+		for (const [tid, d] of clusterDivs) {
+			const g = groups.get(tid);
+			if (!g) {
+				d.style.display = "none";
+				continue;
+			}
+			const p = sigma.graphToViewport({ x: g.sx / g.n, y: g.sy / g.n });
+			d.style.display = "block";
+			d.style.left = `${p.x}px`;
+			d.style.top = `${p.y}px`;
+			d.textContent = g.name;
+		}
+	}
 
-  function onResize() {
-    width = window.innerWidth;
-    height = window.innerHeight - 48;
-    d3.select(svgEl).attr("width", width).attr("height", height);
-    if (worker) worker.postMessage({ type: "size", width, height });
-  }
+	function resetClusters() {
+		if (!clusterLayer) return;
+		for (const d of clusterDivs.values()) d.remove();
+		clusterDivs.clear();
+		updateClusters();
+	}
 
-  // Fit the zoom transform so every visible node is centred in the viewport.
-  export function fitToView() {
-    if (!svgEl || !zoom || !viewNodes.length) return;
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const d of viewNodes) {
-      const i = curIdIdx.get(d.id);
-      const x = i != null ? curX[i] : d.x;
-      const y = i != null ? curY[i] : d.y;
-      if (x < x0) x0 = x;
-      if (y < y0) y0 = y;
-      if (x > x1) x1 = x;
-      if (y > y1) y1 = y;
-    }
-    const dx = x1 - x0 || 1;
-    const dy = y1 - y0 || 1;
-    const pad = 80;
-    const scale = Math.min(
-      (width - pad * 2) / dx, (height - pad * 2) / dy, 2);
-    const tx = width / 2 - scale * ((x0 + x1) / 2);
-    const ty = height / 2 - scale * ((y0 + y1) / 2);
-    const t = d3.zoomIdentity.translate(tx, ty).scale(scale);
-    d3.select(svgEl).transition().duration(400).call(zoom.transform, t);
-  }
+	// ---- layout ----
+	function restartLayout() {
+		if (layout) layout.kill();
+		layout = new FA2Layout(graph, {
+			settings: {
+				...forceAtlas2.inferSettings(graph),
+				gravity: 0.3,
+			},
+		});
+		layout.start();
+	}
+
+	function onLayoutStep() {
+		if (!graph) return;
+	}
+
+	// ---- lifecycle ----
+	let graphStepHandler = null;
+	function bindLayoutListener() {
+		if (graphStepHandler) graph.removeListener("eachNodeAttributesUpdated", graphStepHandler);
+		graphStepHandler = onLayoutStep;
+		graph.on("eachNodeAttributesUpdated", graphStepHandler);
+	}
+
+	function rebuild(vn, vl) {
+		if (layout) {
+			layout.kill();
+			layout = null;
+		}
+		if (graphStepHandler) graph.removeListener("eachNodeAttributesUpdated", graphStepHandler);
+		graphStepHandler = null;
+		graph = buildGraph(vn, vl);
+		if (!sigma) {
+			sigma = createSigma();
+		} else {
+			sigma.setGraph(graph);
+		}
+		bindLayoutListener();
+		hoveredId = null;
+		hoverNeighbors = new Set();
+		hoveredOther = null;
+		pinnedId = null;
+		pinnedNeighbors = new Set();
+		hoveredEdge = null;
+		pinnedEdge = null;
+		tip = { x: 0, y: 0, visible: false, text: "" };
+		resetClusters();
+		restartLayout();
+	}
+
+	$effect(() => {
+		const vn = viewNodes;
+		const vl = viewLinks;
+		if (!vn || !host) return;
+		rebuild(vn, vl);
+	});
+
+	$effect(() => {
+		const sel = selectedId;
+		if (sigma && graph) {
+			if (sel != null && graph.hasNode(String(sel))) {
+				pinnedId = String(sel);
+				pinnedNeighbors = new Set(graph.neighbors(String(sel)));
+			} else {
+				pinnedId = null;
+				pinnedNeighbors = new Set();
+			}
+			pinnedEdge = selectedEdge?.key && graph.hasEdge(selectedEdge.key) ? selectedEdge.key : null;
+			sigma.refresh({ skipIndexation: true });
+		}
+		window.__sel = { selectedId, hasSigma: !!sigma };
+	});
+
+	onDestroy(() => {
+		if (layout) layout.kill();
+		if (sigma) sigma.kill();
+	});
+
+	export function fitToView() {
+		if (sigma && graph && graph.order > 0) {
+			fitViewportToNodes(sigma, graph.nodes(), { animate: true });
+		}
+	}
+
+	export function hoverPartner(nodeId) {
+		if (!graph) return;
+		hoveredOther = nodeId != null ? String(nodeId) : null;
+		if (sigma) sigma.refresh({ skipIndexation: true });
+	}
+
+	export function selectEdge(sourceId, targetId) {
+		if (!sigma || !graph) return;
+		const source = String(sourceId);
+		const target = String(targetId);
+		const edge = graph.edge(source, target) ?? graph.edge(target, source);
+		if (edge == null) return;
+		const s = graph.extremities(edge);
+		const attrs = graph.getEdgeAttributes(edge);
+		onEdgeSelect({
+			key: edge,
+			a: graph.getNodeAttribute(s[0], "name"),
+			b: graph.getNodeAttribute(s[1], "name"),
+			team: graph.getNodeAttribute(s[0], "team") ?? graph.getNodeAttribute(s[1], "team"),
+			w: attrs.w,
+			dates: attrs.dates || [],
+		});
+	}
 </script>
 
-<svg class="graph" bind:this={svgEl}></svg>
+<div class="graph-host" bind:this={host}>
+	{#if tip.visible}
+		<div class="edge-tip" style="left:{tip.x}px;top:{tip.y}px">{tip.text}</div>
+	{/if}
+</div>
