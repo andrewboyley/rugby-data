@@ -245,6 +245,14 @@
 	}
 
 	// ---- graph building ----
+	// Node border follows the team's secondary (home) colour — e.g. South
+	// Africa's gold — then is lightened toward white for contrast on the dark
+	// background, mirroring how the fill's needsBorder() lighten works.
+	function teamBorderColor(tid) {
+		if (tid == null) return null;
+		const t = teams[tid];
+		return t && typeof t === "object" && t.alternateColor ? t.alternateColor : null;
+	}
 	function nodeSize(n, maxApp) {
 		return 4 + 3 * Math.sqrt((n.app || 0) / maxApp);
 	}
@@ -276,10 +284,65 @@
 		const r = parseInt(hex.substr(0, 2), 16) || 0;
 		const g = parseInt(hex.substr(2, 2), 16) || 0;
 		const b = parseInt(hex.substr(4, 2), 16) || 0;
-		const lr = Math.round(r + (255 - r) * 0.55);
-		const lg = Math.round(g + (255 - g) * 0.55);
-		const lb = Math.round(b + (255 - b) * 0.55);
-		return "#" + [lr, lg, lb].map((x) => x.toString(16).padStart(2, "0")).join("");
+		let [h, s, l] = rgbToHsl(r, g, b);
+		// Dark colours would vanish on the dark background. Lift lightness to a
+		// minimum and floor the saturation so the border keeps its identity
+		// (navy stays navy) while staying visible — blending toward white washes
+		// deep hues out to grey.
+		const MIN_LIGHTNESS = 0.5;
+		const MIN_SATURATION = 0.4;
+		if (l < MIN_LIGHTNESS) {
+			l = MIN_LIGHTNESS;
+			s = Math.max(s, MIN_SATURATION);
+			const [nr, ng, nb] = hslToRgb(h, s, l);
+			return (
+				"#" +
+				[nr, ng, nb]
+					.map((x) => Math.round(x).toString(16).padStart(2, "0"))
+					.join("")
+			);
+		}
+		return color;
+	}
+	function rgbToHsl(r, g, b) {
+		r /= 255;
+		g /= 255;
+		b /= 255;
+		const max = Math.max(r, g, b);
+		const min = Math.min(r, g, b);
+		const l = (max + min) / 2;
+		let h = 0;
+		let s = 0;
+		if (max !== min) {
+			const d = max - min;
+			s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+			if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+			else if (max === g) h = (b - r) / d + 2;
+			else h = (r - g) / d + 4;
+			h /= 6;
+		}
+		return [h, s, l];
+	}
+	function hueToRgb(p, q, t) {
+		if (t < 0) t += 1;
+		if (t > 1) t -= 1;
+		if (t < 1 / 6) return p + (q - p) * 6 * t;
+		if (t < 1 / 2) return q;
+		if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+		return p;
+	}
+	function hslToRgb(h, s, l) {
+		let r, g, b;
+		if (s === 0) {
+			r = g = b = l;
+		} else {
+			const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+			const p = 2 * l - q;
+			r = hueToRgb(p, q, h + 1 / 3);
+			g = hueToRgb(p, q, h);
+			b = hueToRgb(p, q, h - 1 / 3);
+		}
+		return [r * 255, g * 255, b * 255];
 	}
 
 	function buildGraph(nodes, links) {
@@ -298,7 +361,7 @@
 				label: n.name,
 				color: nodeColorVal,
 				type: "border",
-				borderColor: needsBorder(nodeColorVal),
+				borderColor: needsBorder(teamBorderColor(n.team) || nodeColorVal),
 				size: nodeSize(n, maxApp),
 				x: p?.x ?? Math.random() * 4 - 2,
 				y: p?.y ?? Math.random() * 4 - 2,
@@ -396,7 +459,12 @@
 			onSelect(clickedId);
 		});
 		s.on("clickStage", () => onSelect(null));
+		s.on("doubleClickStage", ({ preventSigmaDefault }) => {
+			preventSigmaDefault();
+			fitToView();
+		});
 		s.on("enterNode", ({ node }) => {
+			host.style.cursor = "pointer";
 			if (pinnedId != null) {
 				hoveredOther = node;
 				const e = graph.edge(pinnedId, node);
@@ -419,6 +487,7 @@
 			window.__hover = { hoveredId, hoveredOther, neighbors: hoverNeighbors.size };
 		});
 		s.on("leaveNode", () => {
+			host.style.cursor = "default";
 			hoveredId = null;
 			hoveredOther = null;
 			hoverNeighbors = new Set();
@@ -482,6 +551,7 @@
 			if (!clusterDivs.has(tid)) {
 				const d = document.createElement("div");
 				d.className = "sigma-cluster";
+				d.style.setProperty("--cluster-accent", teamColor(Number(tid)));
 				clusterLayer.appendChild(d);
 				clusterDivs.set(tid, d);
 			}
@@ -497,6 +567,11 @@
 			d.style.left = `${p.x}px`;
 			d.style.top = `${p.y}px`;
 			d.textContent = g.name;
+			const inCluster = (id) => id != null && graph.getNodeAttribute(id, "team") === tid;
+			d.classList.toggle(
+				"sigma-cluster-dim",
+				inCluster(hoveredId) || inCluster(hoveredOther) || inCluster(pinnedId),
+			);
 		}
 	}
 

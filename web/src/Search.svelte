@@ -1,10 +1,24 @@
 <script>
 	import { teamName } from "./lib.js";
 
-	let { nodes, teams, onPick } = $props();
+	let { nodes, teams, onPick, selectedId } = $props();
 
 	let q = $state("");
 	let open = $state(false);
+
+	$effect(() => {
+		const id = selectedId;
+		if (id == null) {
+			q = "";
+			open = false;
+			return;
+		}
+		const n = nodes.find((x) => x.id === id);
+		if (n) {
+			q = n.name;
+			open = false;
+		}
+	});
 
 	const hits = $derived.by(() => {
 		const s = q.trim().toLowerCase();

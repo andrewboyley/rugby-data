@@ -9,7 +9,9 @@ from .cache import ApiCache
 from .config import (
     DEFAULT_MAX_WORKERS,
     DEFAULT_SAVE_EVERY,
+    HOME_KIT_COLOURS,
     INTERNATIONAL_TEAM_IDS,
+    SECONDARY_KIT_COLOURS,
     YEARS,
 )
 from .dataset import Dataset
@@ -123,12 +125,25 @@ class DatasetBuilder:
             or team.get("slug")
             or str(team_id)
         )
-        color = team.get("color") or team.get("alternateColor")
+        color = (
+            HOME_KIT_COLOURS.get(str(team_id))
+            or team.get("color")
+            or team.get("alternateColor")
+        )
         if color and isinstance(color, str):
             color = "#" + color.lstrip("#")
         else:
             color = None
-        self._dataset.register_team(team_id, name, color)
+        alternate_color = SECONDARY_KIT_COLOURS.get(str(team_id)) or team.get(
+            "alternateColor"
+        )
+        if alternate_color and isinstance(alternate_color, str):
+            alternate_color = "#" + alternate_color.lstrip("#")
+        else:
+            alternate_color = None
+        self._dataset.register_team(
+            team_id, name, color, alternate_color=alternate_color
+        )
 
     def _fetch_score(self, competitor: dict) -> int | None:
         score_ref = competitor.get("score", {}).get("$ref")

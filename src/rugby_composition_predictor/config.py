@@ -17,6 +17,89 @@ INTERNATIONAL_TEAM_IDS = [
     "15", "16", "20", "23", "25", "27", "29", "57", "81", "82", "289243",
 ]
 
+# Home kit colours for national teams, keyed by ESPN team id. The ESPN API
+# `color` field is a brand/logo colour, which does not always match the
+# jersey the team wears at home, so curated overrides take precedence.
+HOME_KIT_COLOURS: dict[str, str] = {
+    "1": "#FFFFFF",  # England — white
+    "2": "#003778",  # Scotland — navy blue
+    "3": "#169B62",  # Ireland — green
+    "4": "#C8102E",  # Wales — red
+    "5": "#007A33",  # South Africa — Springbok green
+    "6": "#FFB81C",  # Australia — Wallabies gold
+    "8": "#000000",  # New Zealand — black
+    "9": "#1E2952",  # France — navy blue
+    "10": "#75AADB",  # Argentina — celeste blue
+    "11": "#FF0000",  # USA — red
+    "12": "#FFCD00",  # Romania — yellow
+    "14": "#FFFFFF",  # Fiji — white
+    "15": "#00529F",  # Samoa — blue
+    "16": "#C8102E",  # Tonga — red
+    "20": "#0072CE",  # Italy — azzurro
+    "23": "#BC002D",  # Japan — red
+    "25": "#D52B1E",  # Canada — red
+    "27": "#E30613",  # Portugal — red
+    "29": "#6EC4E8",  # Uruguay — sky blue
+    "57": "#FF0000",  # Russia — red
+    "81": "#E4002B",  # Georgia — red
+    "82": "#003580",  # Namibia — blue
+    "33": "#FFDF00",  # Brazil — yellow
+    "289211": "#AA151B",  # Spain — red
+    "289243": "#C8102E",  # Chile — red
+    "289267": "#DA2128",  # Belgium — red
+    "289210": "#000000",  # Kenya — black
+    "289268": "#004A9F",  # Hong Kong — blue
+    "289324": "#FF7A00",  # Netherlands — orange
+    "289356": "#009A4E",  # Zimbabwe — green
+    "289454": "#C60B1E",  # Korea Republic — red
+    "289514": "#CE1126",  # Paraguay — red
+    "289530": "#009E49",  # Burkina Faso — green
+}
+
+# Secondary home/brand colour for each national team, keyed by ESPN team id.
+# The second colour of the team's identity (e.g. South Africa's gold),
+# exposed as `alternateColor`.
+SECONDARY_KIT_COLOURS: dict[str, str] = {
+    "1": "#002147",  # England — navy
+    "2": "#FFFFFF",  # Scotland — white
+    "3": "#FFFFFF",  # Ireland — white
+    "4": "#FFFFFF",  # Wales — white
+    "5": "#FFB81C",  # South Africa — gold
+    "6": "#00843D",  # Australia — green
+    "8": "#FFFFFF",  # New Zealand — white
+    "9": "#ED2939",  # France — red
+    "10": "#FFFFFF",  # Argentina — white
+    "11": "#002868",  # USA — navy
+    "12": "#CE1126",  # Romania — red
+    "14": "#000000",  # Fiji — black
+    "15": "#CE1126",  # Samoa — red
+    "16": "#FFFFFF",  # Tonga — white
+    "20": "#FFFFFF",  # Italy — white
+    "23": "#002654",  # Japan — navy
+    "25": "#FFFFFF",  # Canada — white
+    "27": "#046A38",  # Portugal — green
+    "29": "#FFFFFF",  # Uruguay — white
+    "57": "#FFFFFF",  # Russia — white
+    "81": "#FFFFFF",  # Georgia — white
+    "82": "#D21034",  # Namibia — red
+    "33": "#009739",  # Brazil — green
+    "289211": "#FFC400",  # Spain — yellow
+    "289243": "#FFFFFF",  # Chile — white
+    "289267": "#FDDA24",  # Belgium — yellow
+    "289210": "#CE1126",  # Kenya — red
+    "289268": "#E4002B",  # Hong Kong — red
+    "289324": "#FFFFFF",  # Netherlands — white
+    "289356": "#FFB81C",  # Zimbabwe — gold
+    "289454": "#003478",  # Korea Republic — blue
+    "289514": "#FFFFFF",  # Paraguay — white
+    "289530": "#FFD100",  # Burkina Faso — yellow
+    "32": "#FFFFFF",  # British and Irish Lions — white
+    "7": "#DD0000",  # Germany — red
+    "162": "#FFFFFF",  # Italy A — white
+    "141138": "#FFFFFF",  # Argentina Jaguars — white
+    "264769": "#000000",  # Fiji Warriors — black
+}
+
 DEFAULT_DATASET_PATH = DATA_DIR / "dataset.json"
 DEFAULT_GRAPH_PATH = DATA_DIR / "graph.json"
 DEFAULT_CACHE_PATH = DATA_DIR / "api_cache.json"

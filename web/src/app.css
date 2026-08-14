@@ -79,7 +79,7 @@ header h1 { font-size: 16px; margin: 0; font-weight: 600; }
        font-size: 12px; cursor: pointer; }
 .btn:hover { border-color: var(--accent); color: var(--accent); }
 #panels {
-  position: absolute; right: 16px; top: 64px; z-index: 10;
+  position: absolute; right: 16px; top: 12px; z-index: 10;
   display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
 }
 #panels > #hud, #panels > #edge-hud { position: relative; right: auto; top: auto; }
@@ -157,6 +157,10 @@ header h1 { font-size: 16px; margin: 0; font-weight: 600; }
   font-size: 11px;
   color: var(--text);
   letter-spacing: .01em;
+  cursor: pointer;
+}
+.team-badge:hover {
+  background: rgba(255,255,255,.1);
 }
 .team-dot {
   width: 8px; height: 8px;
@@ -172,6 +176,10 @@ header h1 { font-size: 16px; margin: 0; font-weight: 600; }
   font-size: 12px;
   color: var(--text);
   letter-spacing: .01em;
+  cursor: pointer;
+}
+.hud-team:hover {
+  text-decoration: underline;
 }
 
 .hud-stats {
@@ -342,7 +350,11 @@ header h1 { font-size: 16px; margin: 0; font-weight: 600; }
               border-radius: 50%; margin-right: 6px; vertical-align: middle; }
 #legend .ramp { width: 36px; height: 8px; border-radius: 3px;
               background: linear-gradient(to right, #c43d37, #e6b442, #2ea85f); }
-.graph-host { position: relative; flex: 1 1 0; min-height: 0; width: 100vw; z-index: 0; }
+.graph-wrap {
+  position: relative; flex: 1 1 0; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.graph-host { position: relative; flex: 1 1 0; min-height: 0; width: 100%; z-index: 0; }
 .graph-host canvas { display: block; }
 .edge-tip {
   position: absolute; z-index: 15; transform: translate(-50%, -130%);
@@ -354,13 +366,23 @@ header h1 { font-size: 16px; margin: 0; font-weight: 600; }
   position: absolute;
   z-index: 1;
   transform: translate(-50%, -50%);
-  font-size: 13px;
-  font-weight: 600;
-  color: #9fb8d8;
-  text-shadow: 0 0 3px #11151c, 0 0 6px #11151c;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #e8eef6;
+  background: rgba(17, 21, 28, 0.55);
+  border: 1px solid rgba(120, 140, 165, 0.35);
+  border-left: 3px solid var(--cluster-accent, #9fb8d8);
+  border-radius: 6px;
+  padding: 3px 8px 3px 7px;
+  backdrop-filter: blur(2px);
   pointer-events: none;
   white-space: nowrap;
   user-select: none;
+  transition: opacity 0.15s ease;
+}
+.sigma-cluster-dim {
+  opacity: 0.2;
 }
 .search-wrap { position: relative; }
 #search { background: var(--bg); border: 1px solid var(--border);

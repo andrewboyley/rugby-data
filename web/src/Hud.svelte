@@ -1,7 +1,16 @@
 <script>
 	import { teamName } from "./lib.js";
 
-	let { node, deg, partners, teams, onClear, onPartnerHover, onPartnerClick } = $props();
+	let {
+		node,
+		deg,
+		partners,
+		teams,
+		onClear,
+		onPartnerHover,
+		onPartnerClick,
+		onTeamZoom = () => {},
+	} = $props();
 
 	function partnerName(l) {
 		return l.source.id === node.id ? l.target.name : l.source.name;
@@ -29,14 +38,39 @@
 			{#if node.teams.length}
 				<div class="hud-teams">
 					{#each node.teams as tid}
-						<span class="team-badge" style="--team-color: {teamColor(tid) || 'var(--border)'}">
+						<span
+							class="team-badge"
+							style="--team-color: {teamColor(tid) || 'var(--border)'}"
+							role="button"
+							tabindex="0"
+							title="Zoom to {teamName(teams, tid)}"
+							onclick={() => onTeamZoom(tid)}
+							onkeydown={(e) => {
+								if (e.key === "Enter" || e.key === " ") {
+									e.preventDefault();
+									onTeamZoom(tid);
+								}
+							}}
+						>
 							<span class="team-dot"></span>
 							{teamName(teams, tid)}
 						</span>
 					{/each}
 				</div>
 			{:else if node.team}
-				<div class="hud-team">
+				<div
+					class="hud-team"
+					role="button"
+					tabindex="0"
+					title="Zoom to {teamName(teams, node.team)}"
+					onclick={() => onTeamZoom(node.team)}
+					onkeydown={(e) => {
+						if (e.key === "Enter" || e.key === " ") {
+							e.preventDefault();
+							onTeamZoom(node.team);
+						}
+					}}
+				>
 					<span class="team-dot" style="background: {teamColor(node.team) || 'var(--muted)'}"></span>
 					{teamName(teams, node.team)}
 				</div>

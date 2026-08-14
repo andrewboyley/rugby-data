@@ -22,7 +22,7 @@
 	let selectedId = $state(null);
 	let selectedEdge = $state(null);
 	let gamesByDate = $state(new Map());
-	let edgeColor = $state("none");
+	let edgeColor = $state("winrate");
 	let alphaMin = $state(0.05);
 	let alphaMax = $state(0.6);
 	let nodeColor = $state("team");
@@ -134,7 +134,7 @@
 		dateEnd = null;
 		alphaMin = 0.05;
 		alphaMax = 0.6;
-		edgeColor = "none";
+		edgeColor = "winrate";
 		nodeColor = "team";
 		showEdges = false;
 		selectedId = null;
@@ -199,7 +199,7 @@
 		dateMin={graph ? graph.dateMin : null}
 		dateMax={graph ? graph.dateMax : null}
 	/>
-	<Search {nodes} {teams} onPick={(d) => (selectedId = d.id)} />
+	<Search {nodes} {teams} {selectedId} onPick={(d) => (selectedId = d.id)} />
 <button class="btn" onclick={() => graphCmp?.fitToView()}>Recenter</button>
   <button class="btn" onclick={() => graphCmp?.forceRebuild()}>Rebuild Layout</button>
   <button class="btn" onclick={() => (showEdges = !showEdges)}>{showEdges ? "Hide Edges" : "Show Edges"}</button>
@@ -222,39 +222,45 @@
 	</div>
 </div>
 
-<div id="panels">
-	<Hud
-		node={selectedNode}
-		deg={selectedDeg}
-		{partners}
-		{teams}
-		onClear={clearSelection}
-		{onPartnerHover}
-		{onPartnerClick}
-	/>
-	<EdgeHud edge={selectedEdge} {gamesByDate} {teams} onClear={clearEdge} />
-</div>
+<div class="graph-wrap">
+	{#await graphModule}
+		<div class="graph-host" aria-hidden="true"></div>
+	{:then Graph}
+		<Graph
+			bind:this={graphCmp}
+			viewNodes={view.nodes}
+			viewLinks={view.links}
+			{teams}
+			{jerseyColor}
+			{teamColor}
+			prevPos={posByNode}
+			{selectedId}
+			{selectedEdge}
+			{edgeColor}
+			{alphaMin}
+			{alphaMax}
+			{winRates}
+			{showEdges}
+			{nodeColor}
+			onSelect={onGraphSelect}
+			{onEdgeSelect}
+		/>
+	{/await}
 
-{#await graphModule}
-	<div class="graph-host" aria-hidden="true"></div>
-{:then Graph}
-	<Graph
-		bind:this={graphCmp}
-		viewNodes={view.nodes}
-		viewLinks={view.links}
-		{teams}
-		{jerseyColor}
-		{teamColor}
-		prevPos={posByNode}
-		{selectedId}
-		{selectedEdge}
-		{edgeColor}
-		{alphaMin}
-		{alphaMax}
-		{winRates}
-		{showEdges}
-		{nodeColor}
-		onSelect={onGraphSelect}
-		{onEdgeSelect}
-	/>
-{/await}
+	<div id="panels">
+		<Hud
+			node={selectedNode}
+			deg={selectedDeg}
+			{partners}
+			{teams}
+			onClear={clearSelection}
+			{onPartnerHover}
+			{onPartnerClick}
+			onTeamZoom={(tid) => {
+				clearSelection();
+				graphCmp?.zoomToTeam(tid);
+			}}
+		/>
+		<EdgeHud edge={selectedEdge} {gamesByDate} {teams} onClear={clearEdge} />
+	</div>
+</div>

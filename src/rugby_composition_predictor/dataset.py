@@ -74,9 +74,19 @@ class Dataset:
             return entry.get("color")
         return None
 
-    def register_team(self, team_id: int, name: str, color: str | None = None) -> None:
+    def register_team(
+        self,
+        team_id: int,
+        name: str,
+        color: str | None = None,
+        alternate_color: str | None = None,
+    ) -> None:
         with self._lock:
-            self.teams[team_id] = {"name": name, "color": color}
+            self.teams[team_id] = {
+                "name": name,
+                "color": color,
+                "alternateColor": alternate_color,
+            }
 
     def player_name(self, player_id: int) -> str | None:
         return self.players.get(player_id)
