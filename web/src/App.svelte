@@ -1,26 +1,33 @@
 <script>
 	import { onMount } from "svelte";
-	import { parseGraph, visibleSubset, edgeKey } from "./lib.js";
-	import Graph from "./Graph.svelte";
+	import { parseGraph, visibleSubset } from "./lib.js";
 	import Controls from "./Controls.svelte";
 	import Search from "./Search.svelte";
 	import Hud from "./Hud.svelte";
 	import EdgeHud from "./EdgeHud.svelte";
 
+	// Graph.svelte pulls in sigma/graphology/forceatlas2 (the heaviest modules
+	// in the bundle). Load it lazily so the page shell paints before the graph
+	// stack evaluates on the main thread.
+	const graphModule = import("./Graph.svelte").then((m) => m.default);
+
 	let graph = $state(null);
 	let minW = $state(1);
 	let maxW = $state(45);
+	let maxWCap = $state(45);
+	let minD = $state(1);
 	let maxD = $state(90);
-	let team = $state(null);
 	let dateStart = $state(null);
 	let dateEnd = $state(null);
 	let selectedId = $state(null);
 	let selectedEdge = $state(null);
-	let defaultDateStart = $state(null);
-	let defaultDateEnd = $state(null);
 	let gamesByDate = $state(new Map());
 	let edgeColor = $state("none");
-	let graphCmp;
+	let alphaMin = $state(0.05);
+	let alphaMax = $state(0.6);
+	let nodeColor = $state("team");
+	let showEdges = $state(false);
+	let graphCmp = $state(null);
 
 	const nodes = $derived(graph ? graph.nodes : []);
 	const links = $derived(graph ? graph.links : []);
@@ -28,17 +35,14 @@
 	const maxGlobalDeg = $derived(graph ? graph.maxGlobalDeg : 1);
 	const posByNode = new Map(); // last layout positions by node id (non-reactive; written by Graph)
 	const view = $derived(
-		visibleSubset(nodes, links, minW, maxW, maxD, team, dateStart, dateEnd, posByNode),
+		visibleSubset(nodes, links, minW, maxW, minD, maxD, dateStart, dateEnd, posByNode, graph.playerTeamDates),
 	);
 
 	const windowTotal = $derived.by(() => {
 		if (!graph) return 0;
-		return links.filter((l) => {
-			if (team != null && (l.source.team !== team || l.target.team !== team)) {
-				return false;
-			}
-			return l.dates.some((d) => (!dateStart || d >= dateStart) && (!dateEnd || d <= dateEnd));
-		}).length;
+		return links.filter((l) =>
+			l.dates.some((d) => (!dateStart || d >= dateStart) && (!dateEnd || d <= dateEnd)),
+		).length;
 	});
 
 	const TURBO = [
@@ -67,33 +71,18 @@
 		"#900d00",
 	];
 	const jerseyColor = (j) => (j == null || j < 1 || j > 23 ? "#8e8e93" : TURBO[j - 1]);
-	const selectedNode = $derived(selectedId != null ? nodes.find((n) => n.id === selectedId) : null);
+	const teamColor = (tid) => {
+		if (tid == null) return "#8e8e93";
+		const t = teams[tid];
+		if (t && typeof t === "object" && t.color) return t.color;
+		return "#8e8e93";
+	};
+	const selectedNode = $derived(selectedId != null ? view.nodes.find((n) => n.id === selectedId) : null);
 	const selectedDeg = $derived(
 		selectedId != null ? (view.nodes.find((n) => n.id === selectedId)?.deg ?? 0) : 0,
 	);
 
-	const winRates = $derived.by(() => {
-		const m = new Map();
-		if (edgeColor !== "winrate" || !gamesByDate) return m;
-		for (const l of view.links) {
-			if (!l.dates.length) continue;
-			const id = l.source.id;
-			let wins = 0;
-			let n = 0;
-			for (const d of l.dates) {
-				const g = gamesByDate.get(d);
-				if (!g) continue;
-				const side = g.competitors.find((c) => c.roster?.some((p) => p.playerId === id));
-				if (!side) continue;
-				const opp = g.competitors.find((c) => c !== side);
-				if (!opp) continue;
-				n++;
-				if (side.score > opp.score) wins++;
-			}
-			if (n) m.set(edgeKey(l.source.id, l.target.id), wins / n);
-		}
-		return m;
-	});
+ 	const winRates = $derived(graph ? graph.winRates : {});
 
 	const partners = $derived.by(() => {
 		if (!selectedNode) return [];
@@ -104,22 +93,28 @@
 	});
 
 	onMount(async () => {
-		const text = await fetch("/data/graph.gexf").then((r) => r.text());
+		const text = await fetch("/data/graph.json").then((r) => r.text());
 		graph = parseGraph(text);
 		maxD = graph.maxGlobalDeg;
-		defaultDateStart = graph.dateMin || null;
-		defaultDateEnd = graph.dateMax || null;
-		dateStart = defaultDateStart;
-		dateEnd = defaultDateEnd;
-		try {
-			const data = await fetch("/data/dataset.json").then((r) => r.json());
-			const index = new Map();
-			for (const g of data.games || []) {
-				index.set(g.date.slice(0, 10), g);
+		const maxEW = graph.links.reduce((m, l) => Math.max(m, l.w), 0);
+		maxWCap = Math.max(1, maxEW);
+		maxW = maxWCap;
+		const index = new Map();
+		for (const g of graph.games || []) {
+			index.set(g.date, g);
+		}
+		gamesByDate = index;
+		// Derive default date range: end at most recent date, start one year prior
+		if (!dateStart && !dateEnd) {
+			const allDates = [...new Set((graph.games || []).map((g) => g.date))];
+			if (allDates.length) {
+				const sorted = [...allDates].sort();
+				const maxDate = sorted[sorted.length - 1];
+				const oneYearAgo = new Date(maxDate);
+				oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+				dateStart = oneYearAgo.toISOString().slice(0, 10);
+				dateEnd = maxDate;
 			}
-			gamesByDate = index;
-		} catch {
-			/* edge pane falls back to date-only rows */
 		}
 	});
 
@@ -132,13 +127,19 @@
 	}
 	function resetView() {
 		minW = 1;
-		maxW = 45;
+		maxW = maxWCap;
+		minD = 1;
 		maxD = graph ? graph.maxGlobalDeg : 90;
-		team = null;
-		dateStart = defaultDateStart;
-		dateEnd = defaultDateEnd;
+		dateStart = null;
+		dateEnd = null;
+		alphaMin = 0.05;
+		alphaMax = 0.6;
+		edgeColor = "none";
+		nodeColor = "team";
+		showEdges = false;
 		selectedId = null;
 		selectedEdge = null;
+		graphCmp?.forceRebuild();
 	}
 	function onGraphSelect(id) {
 		selectedId = id;
@@ -157,7 +158,11 @@
 
 <svelte:window
 	onclick={(ev) => {
-		if (!ev.target.closest(".graph-host, .search-wrap, #hud, #edge-hud")) clearSelection();
+		// Interacting with the toolbar (colour dropdowns, sliders, buttons)
+		// must not drop the current node/edge selection; only clicks on the
+		// empty graph area or outside the UI do.
+		if (ev.target instanceof Element && !ev.target.closest(".graph-host, .search-wrap, #hud, #edge-hud, header"))
+			clearSelection();
 	}}
 	onkeydown={(ev) => {
 		if (ev.key === "Escape") clearSelection();
@@ -177,19 +182,28 @@
 	<Controls
 		bind:minW
 		bind:maxW
+		bind:minD
 		bind:maxD
-		bind:team
 		bind:dateStart
 		bind:dateEnd
 		bind:edgeColor
+		bind:alphaMin
+		bind:alphaMax
+		bind:nodeColor
 		{teams}
+		onTeamZoom={(tid) => graphCmp?.zoomToTeam(tid)}
+		onEdgeAlpha={(lo, hi) => graphCmp?.setEdgeAlpha(lo, hi)}
+		onEdgeColor={(mode) => graphCmp?.setEdgeColorMode(mode)}
 		maxDeg={maxGlobalDeg}
-		dateMin={defaultDateStart}
-		dateMax={defaultDateEnd}
+		maxWCap={maxWCap}
+		dateMin={graph ? graph.dateMin : null}
+		dateMax={graph ? graph.dateMax : null}
 	/>
 	<Search {nodes} {teams} onPick={(d) => (selectedId = d.id)} />
-	<button class="btn" onclick={() => graphCmp?.fitToView()}>Recenter</button>
-	<button class="btn" onclick={resetView}>Reset</button>
+<button class="btn" onclick={() => graphCmp?.fitToView()}>Recenter</button>
+  <button class="btn" onclick={() => graphCmp?.forceRebuild()}>Rebuild Layout</button>
+  <button class="btn" onclick={() => (showEdges = !showEdges)}>{showEdges ? "Hide Edges" : "Show Edges"}</button>
+  <button class="btn" onclick={resetView}>Reset</button>
 </header>
 
 <div id="legend">
@@ -221,17 +235,26 @@
 	<EdgeHud edge={selectedEdge} {gamesByDate} {teams} onClear={clearEdge} />
 </div>
 
-<Graph
-	bind:this={graphCmp}
-	viewNodes={view.nodes}
-	viewLinks={view.links}
-	{teams}
-	{jerseyColor}
-	prevPos={posByNode}
-	{selectedId}
-	{selectedEdge}
-	{edgeColor}
-	{winRates}
-	onSelect={onGraphSelect}
-	{onEdgeSelect}
-/>
+{#await graphModule}
+	<div class="graph-host" aria-hidden="true"></div>
+{:then Graph}
+	<Graph
+		bind:this={graphCmp}
+		viewNodes={view.nodes}
+		viewLinks={view.links}
+		{teams}
+		{jerseyColor}
+		{teamColor}
+		prevPos={posByNode}
+		{selectedId}
+		{selectedEdge}
+		{edgeColor}
+		{alphaMin}
+		{alphaMax}
+		{winRates}
+		{showEdges}
+		{nodeColor}
+		onSelect={onGraphSelect}
+		{onEdgeSelect}
+	/>
+{/await}

@@ -11,7 +11,6 @@ from .config import (
     CORE_API_BASE,
     REQUEST_TIMEOUT_SECONDS,
     RETRY_ATTEMPTS,
-    SOUTH_AFRICA_TEAM_ID,
     USER_AGENT,
 )
 
@@ -82,7 +81,7 @@ class EspnApi:
     def _describe(self, url: str) -> str:
         """Human-readable label for a CORE API url."""
         path = url.replace(self._base_url, "").split("?")[0].rstrip("/")
-        if f"teams/{SOUTH_AFRICA_TEAM_ID}/events" in path:
+        if path.endswith("/events"):
             return "event discovery"
         if "/athletes/" in path:
             return f"athlete {_last_segment(path)}"

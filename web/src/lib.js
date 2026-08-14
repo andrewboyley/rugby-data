@@ -1,108 +1,72 @@
-// Build node/link structures from graph.gexf XML and compute the visible
+// Build node/link structures from graph.json and compute the visible
 // subset for the current filters.
 
 export function parseGraph(text) {
-	const parser = new DOMParser();
-	const doc = parser.parseFromString(text, "application/xml");
+    const data = JSON.parse(text);
 
-	const keywordsEl = doc.getElementsByTagName("keywords")[0];
-	let meta = {};
-	if (keywordsEl && keywordsEl.textContent) {
-		try {
-			meta = JSON.parse(keywordsEl.textContent.trim());
-		} catch (e) {
-			console.error("Failed to parse GEXF keywords metadata", e);
-		}
-	}
+    const players = Object.fromEntries(
+        Object.entries(data.players || {}).map(([k, v]) => [Number(k), v]),
+    );
+    const appearances = Object.fromEntries(
+        Object.entries(data.appearances || {}).map(([k, v]) => [Number(k), Number(v)]),
+    );
+    const playerTeams = Object.fromEntries(
+        Object.entries(data.playerTeams || {}).map(([k, v]) => [Number(k), Array.isArray(v) ? v.map(Number) : [Number(v)]]),
+    );
+    const playerTeamDates = Object.fromEntries(
+        Object.entries(data.playerTeamDates || {}).map(([k, v]) => [
+            Number(k),
+            Object.fromEntries(
+                Object.entries(v).map(([tk, tv]) => [Number(tk), tv.slice().sort()])
+            ),
+        ]),
+    );
+    const playerJersey = Object.fromEntries(
+        Object.entries(data.playerJersey || {}).map(([k, v]) => [Number(k), Number(v)]),
+    );
+    const playerDates = Object.fromEntries(
+        Object.entries(data.playerDates || {}).map(([k, v]) => [Number(k), v.slice().sort()]),
+    );
 
-	const players = Object.fromEntries(
-		Object.entries(meta.players || {}).map(([k, v]) => [Number(k), v]),
-	);
-	const appearances = Object.fromEntries(
-		Object.entries(meta.appearances || {}).map(([k, v]) => [Number(k), Number(v)]),
-	);
-	const playerTeams = Object.fromEntries(
-		Object.entries(meta.playerTeams || {}).map(([k, v]) => [Number(k), Number(v)]),
-	);
-	const playerJersey = Object.fromEntries(
-		Object.entries(meta.playerJersey || {}).map(([k, v]) => [Number(k), Number(v)]),
-	);
-	const playerDates = Object.fromEntries(
-		Object.entries(meta.playerDates || {}).map(([k, v]) => [Number(k), v.slice().sort()]),
-	);
+    const nodes = Object.entries(appearances).map(([id, app]) => {
+        const teams = playerTeams[Number(id)] ?? [];
+        const teamId = teams[0] ?? null;
+        return {
+            id: Number(id),
+            name: players[Number(id)] || String(id),
+            team: teamId,
+            teams,
+            jersey: playerJersey[Number(id)] ?? null,
+            app,
+            dates: playerDates[Number(id)] || [],
+            deg: 0,
+            globalDeg: 0,
+        };
+    });
+    const byId = new Map(nodes.map((n) => [n.id, n]));
 
-	// Fallback: parse nodes from DOM if metadata keywords is missing
-	if (Object.keys(appearances).length === 0) {
-		const nodeEls = doc.getElementsByTagName("node");
-		for (const nEl of nodeEls) {
-			const id = Number(nEl.getAttribute("id"));
-			const label = nEl.getAttribute("label");
-			players[id] = label;
-			appearances[id] = 1;
-			const atts = nEl.getElementsByTagName("attvalue");
-			for (const att of atts) {
-				const attrFor = att.getAttribute("for");
-				const val = att.getAttribute("value");
-				if (attrFor === "app") appearances[id] = Number(val);
-				if (attrFor === "team") playerTeams[id] = Number(val);
-				if (attrFor === "jersey") playerJersey[id] = Number(val);
-				if (attrFor === "dates") playerDates[id] = val ? val.split(",") : [];
-			}
-		}
-	}
+    const links = (data.edges || [])
+        .map((e) => {
+            const a = byId.get(e.playerA);
+            const b = byId.get(e.playerB);
+            return a && b
+                ? { source: a, target: b, w: e.weight, recency: e.recency ?? 0.5, dates: (e.dates || []).slice().sort() }
+                : null;
+        })
+        .filter(Boolean);
 
-	const nodes = Object.entries(appearances).map(([id, app]) => ({
-		id: Number(id),
-		name: players[Number(id)] || String(id),
-		team: playerTeams[Number(id)] ?? null,
-		jersey: playerJersey[Number(id)] ?? null,
-		app,
-		dates: playerDates[Number(id)] || [],
-		deg: 0,
-		globalDeg: 0,
-	}));
-	const byId = new Map(nodes.map((n) => [n.id, n]));
+    for (const l of links) {
+        l.source.globalDeg++;
+        l.target.globalDeg++;
+    }
+    const maxGlobalDeg = Math.max(0, ...nodes.map((n) => n.globalDeg)) || 1;
 
-	let rawEdges = meta.edges || [];
-	if (rawEdges.length === 0) {
-		const edgeEls = doc.getElementsByTagName("edge");
-		for (const eEl of edgeEls) {
-			const source = Number(eEl.getAttribute("source"));
-			const target = Number(eEl.getAttribute("target"));
-			let weight = Number(eEl.getAttribute("weight") || 1);
-			let dates = [];
-			const atts = eEl.getElementsByTagName("attvalue");
-			for (const att of atts) {
-				const attrFor = att.getAttribute("for");
-				const val = att.getAttribute("value");
-				if (attrFor === "weight") weight = Number(val);
-				if (attrFor === "dates") dates = val ? val.split(",") : [];
-			}
-			rawEdges.push({ playerA: source, playerB: target, weight, dates });
-		}
-	}
+    const teams = data.teams || {};
+    const dateMin = data.dateMin || null;
+    const dateMax = data.dateMax || null;
+    const winRates = new Map(Object.entries(data.winRates || {}));
 
-	const links = rawEdges
-		.map((e) => {
-			const a = byId.get(e.playerA);
-			const b = byId.get(e.playerB);
-			return a && b
-				? { source: a, target: b, w: e.weight, dates: (e.dates || []).slice().sort() }
-				: null;
-		})
-		.filter(Boolean);
-
-	for (const l of links) {
-		l.source.globalDeg++;
-		l.target.globalDeg++;
-	}
-	const maxGlobalDeg = Math.max(0, ...nodes.map((n) => n.globalDeg)) || 1;
-
-	const teams = meta.teams || {};
-	const dateMin = meta.dateMin || null;
-	const dateMax = meta.dateMax || null;
-
-	return { nodes, links, teams, maxGlobalDeg, dateMin, dateMax };
+    return { nodes, links, teams, maxGlobalDeg, dateMin, dateMax, winRates, games: data.games || [], playerTeamDates };
 }
 
 // Stable key for an undirected edge, independent of endpoint order.
@@ -137,7 +101,9 @@ export function winRateColor(p) {
 
 export function teamName(teams, tid) {
 	if (tid == null) return "";
-	return teams[tid] || `team ${tid}`;
+	const t = teams[tid];
+	if (!t) return `team ${tid}`;
+	return typeof t === "string" ? t : t.name;
 }
 
 // Restrict to one team (when set) and a date window, compute weights and
@@ -145,7 +111,7 @@ export function teamName(teams, tid) {
 // filters. Pure: returns fresh node/link objects so it is safe to call from a
 // $derived. Matches nodes by ID, never by object reference (Svelte reactive
 // proxies do not preserve identity).
-export function visibleSubset(nodes, links, minW, maxW, maxD, team, dateStart, dateEnd, prevPos) {
+export function visibleSubset(nodes, links, minW, maxW, minD, maxD, dateStart, dateEnd, prevPos, playerTeamDates) {
 	let lo = dateStart,
 		hi = dateEnd;
 	if (lo && hi && lo > hi) {
@@ -154,7 +120,7 @@ export function visibleSubset(nodes, links, minW, maxW, maxD, team, dateStart, d
 		hi = swap;
 	}
 	const inRange = (d) => d && (!lo || d >= lo) && (!hi || d <= hi);
-	const nodeSet = team == null ? nodes : nodes.filter((n) => n.team === team);
+	const nodeSet = nodes;
 	const inSet = new Set(nodeSet.map((n) => n.id));
 
 	const app = new Map();
@@ -175,12 +141,16 @@ export function visibleSubset(nodes, links, minW, maxW, maxD, team, dateStart, d
 	}
 	const wLo = Math.min(minW, maxW),
 		wHi = Math.max(minW, maxW);
+	const dLo = Math.min(minD, maxD),
+		dHi = Math.max(minD, maxD);
 	const ls = kept.filter(
 		({ l, w }) =>
 			w >= wLo &&
 			w <= wHi &&
-			(deg.get(l.source.id) || 0) <= maxD &&
-			(deg.get(l.target.id) || 0) <= maxD,
+			(deg.get(l.source.id) || 0) >= dLo &&
+			(deg.get(l.source.id) || 0) <= dHi &&
+			(deg.get(l.target.id) || 0) >= dLo &&
+			(deg.get(l.target.id) || 0) <= dHi,
 	);
 	const keep = new Set();
 	for (const { l } of ls) {
@@ -192,6 +162,13 @@ export function visibleSubset(nodes, links, minW, maxW, maxD, team, dateStart, d
 		.map((n) => {
 			const p = prevPos && prevPos.get(n.id);
 			const node = { ...n, deg: deg.get(n.id) || 0, app: app.get(n.id) || 0 };
+			if (playerTeamDates && playerTeamDates[n.id]) {
+				const dates_by_team = playerTeamDates[n.id];
+				node.teams = node.teams.filter((tid) =>
+					(dates_by_team[tid] || []).some(inRange),
+				);
+				node.team = node.teams[0] ?? null;
+			}
 			if (p) {
 				node.x = p.x;
 				node.y = p.y;
@@ -199,11 +176,38 @@ export function visibleSubset(nodes, links, minW, maxW, maxD, team, dateStart, d
 			return node;
 		});
 	const byId = new Map(out.map((n) => [n.id, n]));
-	const outLinks = ls.map(({ l, w }) => ({
+	let winMin = lo,
+		winMax = hi;
+	for (const { l } of kept) {
+		const ds = l.dates.length ? l.dates.filter(inRange) : l.dates;
+		for (const d of ds) {
+			if (winMin == null || d < winMin) winMin = d;
+			if (winMax == null || d > winMax) winMax = d;
+		}
+	}
+	const spanDays = winMin != null && winMax != null ? (Date.parse(winMax) - Date.parse(winMin)) / 864e5 : 0;
+	const raw = ls.map(({ l, w }) => {
+		const dates = l.dates.length ? l.dates.filter(inRange) : [];
+		let rec = l.recency ?? 0.5;
+		if (spanDays > 0 && dates.length) {
+			const latest = dates[dates.length - 1];
+			rec = Math.max(0, Math.min(1, (Date.parse(latest) - Date.parse(winMin)) / 864e5 / spanDays));
+		}
+		return { l, w, dates, rec };
+	});
+	let rMin = Infinity,
+		rMax = -Infinity;
+	for (const { rec } of raw) {
+		if (rec < rMin) rMin = rec;
+		if (rec > rMax) rMax = rec;
+	}
+	const span = rMax - rMin || 1;
+	const outLinks = raw.map(({ l, w, dates, rec }) => ({
 		source: byId.get(l.source.id),
 		target: byId.get(l.target.id),
 		w,
-		dates: l.dates.length ? l.dates.filter(inRange) : [],
+		recency: rMin === rMax ? 1 : (rec - rMin) / span,
+		dates,
 	}));
 	return { nodes: out, links: outLinks };
 }

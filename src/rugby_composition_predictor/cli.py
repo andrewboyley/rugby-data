@@ -11,6 +11,7 @@ from .config import (
     DEFAULT_CACHE_PATH,
     DEFAULT_DATASET_PATH,
     DEFAULT_GRAPH_PATH,
+    INTERNATIONAL_TEAM_IDS,
 )
 from .dataset import Dataset
 from .graph import CoOccurrenceGraph
@@ -20,14 +21,19 @@ from .reporting import RichProgressBar
 def build_dataset(
     dataset_path: Path = DEFAULT_DATASET_PATH,
     cache_path: Path = DEFAULT_CACHE_PATH,
+    team_ids: list[str] | None = None,
 ) -> None:
     cache = ApiCache(cache_path)
     dataset = Dataset.load(dataset_path)
     api = EspnApi(cache)
-    builder = DatasetBuilder(api, cache, dataset, dataset_path)
+    builder = DatasetBuilder(api, cache, dataset, dataset_path, team_ids=team_ids)
 
-    print("== South Africa international rugby dataset builder ==")
-    print("  Team:     South Africa (id 5)")
+    if team_ids:
+        scope = ", ".join(team_ids)
+    else:
+        scope = f"all {len(INTERNATIONAL_TEAM_IDS)} international teams"
+    print("== International rugby dataset builder ==")
+    print(f"  Teams:    {scope}")
     print(f"  Output:   {dataset_path}")
     print(f"  Cache:    {cache_path} ({len(cache)} entries loaded)")
     print()
@@ -56,7 +62,7 @@ def main(argv=None) -> None:
     parser = argparse.ArgumentParser(
         prog="rugby-composition-predictor",
         description="Build a dataset and co-occurrence graph of "
-        "South African international rugby matches.",
+        "international rugby matches.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -68,6 +74,11 @@ def main(argv=None) -> None:
     )
     dataset_cmd.add_argument(
         "--cache", default=DEFAULT_CACHE_PATH, help="cache path (default: %(default)s)"
+    )
+    dataset_cmd.add_argument(
+        "--team",
+        default=None,
+        help="restrict to a single team id (default: all international teams)",
     )
 
     graph_cmd = sub.add_parser("graph", help="build graph.json")
@@ -85,6 +96,7 @@ def main(argv=None) -> None:
     args = parser.parse_args(argv)
 
     if args.command == "dataset":
-        build_dataset(Path(args.output), Path(args.cache))
+        team_ids = [args.team] if args.team else None
+        build_dataset(Path(args.output), Path(args.cache), team_ids=team_ids)
     elif args.command == "graph":
         build_graph(Path(args.input), Path(args.output))

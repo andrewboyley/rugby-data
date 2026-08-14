@@ -9,10 +9,16 @@ wheels/
 # Virtual environments
 .venv
 
+# JS dependencies
+node_modules/
+
 # Generated data files
 *.json.tmp
 *.json.corrupt
-# CocoIndex Code (ccc)
-/.cocoindex_code/
 # CodeGraph index
 /.codegraph/
+
+data/*
+*.gz
+# CocoIndex Code (ccc)
+/.cocoindex_code/

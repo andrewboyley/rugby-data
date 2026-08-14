@@ -9,7 +9,7 @@ from .cache import ApiCache
 from .config import (
     DEFAULT_MAX_WORKERS,
     DEFAULT_SAVE_EVERY,
-    SOUTH_AFRICA_TEAM_ID,
+    INTERNATIONAL_TEAM_IDS,
     YEARS,
 )
 from .dataset import Dataset
@@ -25,7 +25,7 @@ class DatasetBuilder:
         dataset: Dataset,
         output_path: Path,
         *,
-        team_id: str = SOUTH_AFRICA_TEAM_ID,
+        team_ids: list[str] | None = None,
         years=YEARS,
         max_workers: int = DEFAULT_MAX_WORKERS,
         save_every: int = DEFAULT_SAVE_EVERY,
@@ -34,7 +34,7 @@ class DatasetBuilder:
         self._cache = cache
         self._dataset = dataset
         self._output_path = output_path
-        self._team_id = team_id
+        self._team_ids = team_ids if team_ids is not None else INTERNATIONAL_TEAM_IDS
         self._years = years
         self._max_workers = max_workers
         self._save_every = save_every
@@ -42,6 +42,10 @@ class DatasetBuilder:
 
     def build(self, listener: BuildListener | None = None) -> None:
         """Fetch all pending events and save the completed dataset."""
+        # Load existing games from dataset to sync with cache's processed events
+        for game in self._dataset.games:
+            self._cache.mark_processed(game.event_id)
+
         event_urls = self._discover_event_urls()
         pending = [
             u for u in event_urls if not self._cache.is_processed(event_id_from_url(u))
@@ -77,8 +81,9 @@ class DatasetBuilder:
 
     def _discover_event_urls(self) -> list[str]:
         urls = set()
-        for year in self._years:
-            urls.update(self._api.events_for_year(self._team_id, year))
+        for team_id in self._team_ids:
+            for year in self._years:
+                urls.update(self._api.events_for_year(team_id, year))
         return sorted(urls)
 
     def _fetch_game(self, event_url: str) -> Game | None:
@@ -118,7 +123,12 @@ class DatasetBuilder:
             or team.get("slug")
             or str(team_id)
         )
-        self._dataset.register_team(team_id, name)
+        color = team.get("color") or team.get("alternateColor")
+        if color and isinstance(color, str):
+            color = "#" + color.lstrip("#")
+        else:
+            color = None
+        self._dataset.register_team(team_id, name, color)
 
     def _fetch_score(self, competitor: dict) -> int | None:
         score_ref = competitor.get("score", {}).get("$ref")

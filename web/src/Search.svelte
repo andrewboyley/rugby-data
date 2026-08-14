@@ -8,7 +8,12 @@
 
 	const hits = $derived.by(() => {
 		const s = q.trim().toLowerCase();
-		if (!s) return [];
+		if (!s) {
+			return nodes
+				.slice()
+				.sort((a, b) => b.app - a.app)
+				.slice(0, 50);
+		}
 		return nodes
 			.filter((n) => n.name.toLowerCase().includes(s))
 			.sort((a, b) => b.app - a.app)
@@ -18,7 +23,7 @@
 
 <svelte:window
 	onclick={(ev) => {
-		if (!ev.target.closest(".search-wrap")) open = false;
+		if (ev.target instanceof Element && !ev.target.closest(".search-wrap")) open = false;
 	}}
 />
 
@@ -51,7 +56,13 @@
 					}}
 				>
 					<b>{d.name}</b> &middot; {d.app} apps
-					<span class="team">{teamName(teams, d.team)}</span>
+					<span class="team">
+						{#if d.teams.length}
+							{d.teams.map(tid => teamName(teams, tid)).join(', ')}
+						{:else}
+							{teamName(teams, d.team)}
+						{/if}
+					</span>
 				</div>
 			{/each}
 		</div>

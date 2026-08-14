@@ -1,8 +1,11 @@
 # Rugby Composition Predictor
 
-Builds a dataset of South African international rugby matches from the ESPN
-CORE API, derives a player co-occurrence graph, and visualises it in the
-browser.
+Builds a dataset of international rugby union matches from the ESPN CORE API,
+derives a player co-occurrence graph, and visualises it in the browser.
+
+The dataset covers all international (national) teams. Match discovery
+iterates each team's events per year, so any competition a national team enters
+— across current or future leagues — is captured automatically.
 
 ## Commands
 
@@ -13,6 +16,9 @@ uv sync
 .venv/bin/rugby-composition-predictor dataset   # fetch & build data/dataset.json
 .venv/bin/rugby-composition-predictor graph      # build data/graph.json
 ```
+
+Restrict to a single team with `--team <id>` (e.g. `--team 5` for South
+Africa); omit it to fetch all international teams.
 
 Both commands are resumable and idempotent. Raw API responses are cached in
 `data/api_cache.json`, so re-runs are fast and do not hit the network for

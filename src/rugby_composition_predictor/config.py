@@ -9,8 +9,16 @@ CORE_API_BASE = "https://sports.core.api.espn.com/v2/sports/rugby"
 SOUTH_AFRICA_TEAM_ID = "5"
 YEARS = range(2016, 2027)
 
+# International (national) rugby union teams. Seeded from the Rugby World Cup
+# participants across recent editions; match discovery iterates these teams so
+# any competition a national team enters is captured regardless of new leagues.
+INTERNATIONAL_TEAM_IDS = [
+    "1", "2", "3", "4", "5", "6", "8", "9", "10", "11", "12", "14",
+    "15", "16", "20", "23", "25", "27", "29", "57", "81", "82", "289243",
+]
+
 DEFAULT_DATASET_PATH = DATA_DIR / "dataset.json"
-DEFAULT_GRAPH_PATH = DATA_DIR / "graph.gexf"
+DEFAULT_GRAPH_PATH = DATA_DIR / "graph.json"
 DEFAULT_CACHE_PATH = DATA_DIR / "api_cache.json"
 
 DEFAULT_MAX_WORKERS = 8
