@@ -1,44 +1,32 @@
 <script>
 	import { teamName } from "./lib.js";
 
-	let { edge, gamesByDate, teams, onClear } = $props();
+	let { edge, gamesByDate, teams, onClear, onMatchClick = () => {}, activeMatch = null } = $props();
 
 	function gameRow(d) {
-		const g = gamesByDate?.get(d);
-		if (!g) return { date: d, opponent: null, score: null, opp1: null, opp2: null, score1: null, score2: null };
-		if (g.competitors.length < 2) {
-			const c = g.competitors[0] || {};
-			return {
-				date: d,
-				opponent: teamName(teams, c.teamId) ?? null,
-				score: `${c.score ?? 0}–${0}`,
-				opp1: teamName(teams, c.teamId) ?? null,
-				opp2: null,
-				score1: c.score ?? 0,
-				score2: 0,
-			};
-		}
-		const c1 = g.competitors[0];
-		const c2 = g.competitors[1];
-		const team1Id = c1.teamId;
-		const team2Id = c2.teamId;
-		const team1Name = teamName(teams, team1Id);
-		const team2Name = teamName(teams, team2Id);
-		const score1 = c1.score ?? 0;
-		const score2 = c2.score ?? 0;
-		let opponent = null;
-		if (edge.team != null) {
-			if (edge.team === team1Id) opponent = team2Name;
-			else if (edge.team === team2Id) opponent = team1Name;
-		}
+		const games = gamesByDate?.get(d) || [];
+		// A date can host several matches (e.g. a whole Six Nations round on one
+		// day). The pair's games are the ones involving their team; prefer that
+		// match over an unrelated game on the same date.
+		const g =
+			games.find((x) => edge.team != null && (x.competitors || []).some((c) => c.teamId === edge.team)) ||
+			games[0];
+		if (!g) return { date: d, home: null, away: null, score1: null, score2: null, homeMine: false, awayMine: false, homeWin: false, awayWin: false, g: null };
+		const home = g.competitors.find((c) => c.home) ?? g.competitors[0];
+		const away = g.competitors.find((c) => !c.home) ?? g.competitors[1];
+		const score1 = home?.score ?? 0;
+		const score2 = away?.score ?? 0;
 		return {
 			date: d,
-			opponent,
-			score: `${score1}–${score2}`,
-			opp1: team1Name,
-			opp2: team2Name,
+			home: home ? teamName(teams, home.teamId) ?? null : null,
+			away: away ? teamName(teams, away.teamId) ?? null : null,
 			score1,
 			score2,
+			homeMine: home != null && edge.team != null && home.teamId === edge.team,
+			awayMine: away != null && edge.team != null && away.teamId === edge.team,
+			homeWin: score1 > score2,
+			awayWin: score2 > score1,
+			g,
 		};
 	}
 </script>
@@ -65,18 +53,26 @@
 			{#if edge.dates?.length}
 				<div class="hud-section-title">Match history</div>
 				<div class="hud-links">
-					{#each edge.dates as d (d)}
+					{#each [...edge.dates].sort().reverse() as d (d)}
 						{@const row = gameRow(d)}
-						<div class="game-row">
+						<div
+							class="game-row {activeMatch?.eventId === row.g?.eventId ? "active" : ""}"
+							role="button"
+							tabindex="0"
+							title="Show players who took part"
+							onclick={() => onMatchClick(row.g)}
+							onkeydown={(e) => {
+								if (e.key === "Enter" || e.key === " ") {
+									e.preventDefault();
+									onMatchClick(row.g);
+								}
+							}}
+						>
 							<span class="game-date">{d}</span>
-							<span class="game-info">
-								{#if row.opp1 && row.opp2}
-									<span class="game-team">{row.opp1} <span class="game-score">{row.score1}–{row.score2}</span> {row.opp2}</span>
-								{:else if row.opponent}
-									<span class="game-team">vs {row.opponent} <span class="game-score">{row.score}</span></span>
-								{:else}
-									<span class="game-team">{row.opponent ?? "match"}</span>
-								{/if}
+							<span class="game-match">
+								<span class="game-team {row.homeMine ? "mine" : ""} {row.homeWin ? "winner" : ""}">{row.home ?? "?"}</span>
+								<span class="game-score">{row.score1}–{row.score2}</span>
+								<span class="game-team {row.awayMine ? "mine" : ""} {row.awayWin ? "winner" : ""}">{row.away ?? "?"}</span>
 							</span>
 						</div>
 					{/each}

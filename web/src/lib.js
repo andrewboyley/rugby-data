@@ -111,7 +111,7 @@ export function teamName(teams, tid) {
 // filters. Pure: returns fresh node/link objects so it is safe to call from a
 // $derived. Matches nodes by ID, never by object reference (Svelte reactive
 // proxies do not preserve identity).
-export function visibleSubset(nodes, links, minW, maxW, minD, maxD, dateStart, dateEnd, prevPos, playerTeamDates) {
+export function visibleSubset(nodes, links, minW, maxW, minD, maxD, dateStart, dateEnd, prevPos, playerTeamDates, matchPlayers = null, matchTeamOf = null) {
 	let lo = dateStart,
 		hi = dateEnd;
 	if (lo && hi && lo > hi) {
@@ -120,7 +120,7 @@ export function visibleSubset(nodes, links, minW, maxW, minD, maxD, dateStart, d
 		hi = swap;
 	}
 	const inRange = (d) => d && (!lo || d >= lo) && (!hi || d <= hi);
-	const nodeSet = nodes;
+	const nodeSet = matchPlayers ? nodes.filter((n) => matchPlayers.has(n.id)) : nodes;
 	const inSet = new Set(nodeSet.map((n) => n.id));
 
 	const app = new Map();
@@ -159,16 +159,25 @@ export function visibleSubset(nodes, links, minW, maxW, minD, maxD, dateStart, d
 	}
 	const out = nodeSet
 		.filter((n) => keep.has(n.id))
-		.map((n) => {
-			const p = prevPos && prevPos.get(n.id);
-			const node = { ...n, deg: deg.get(n.id) || 0, app: app.get(n.id) || 0 };
-			if (playerTeamDates && playerTeamDates[n.id]) {
-				const dates_by_team = playerTeamDates[n.id];
-				node.teams = node.teams.filter((tid) =>
-					(dates_by_team[tid] || []).some(inRange),
-				);
-				node.team = node.teams[0] ?? null;
-			}
+.map((n) => {
+				const p = prevPos && prevPos.get(n.id);
+				const node = { ...n, deg: deg.get(n.id) || 0, app: app.get(n.id) || 0 };
+				if (matchTeamOf && matchTeamOf.has(n.id)) {
+					// Inside a focused match every participant wears their side's
+					// colours/label for that game. node.teams is a recency-sorted
+					// list of every team the player has ever played for, whose
+					// first entry (most recent) is wrong when a player later
+					// switched sides (e.g. France -> Fiji): without this pin the
+					// player would render under the wrong cluster label.
+					node.teams = [matchTeamOf.get(n.id)];
+					node.team = matchTeamOf.get(n.id);
+				} else if (playerTeamDates && playerTeamDates[n.id]) {
+					const dates_by_team = playerTeamDates[n.id];
+					node.teams = node.teams.filter((tid) =>
+						(dates_by_team[tid] || []).some(inRange),
+					);
+					node.team = node.teams[0] ?? null;
+				}
 			if (p) {
 				node.x = p.x;
 				node.y = p.y;

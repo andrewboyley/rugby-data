@@ -9,7 +9,11 @@
 		onClear,
 		onPartnerHover,
 		onPartnerClick,
+		hoveredTeammate = null,
 		onTeamZoom = () => {},
+		playerMatches = [],
+		onMatchClick = () => {},
+		activeMatch = null,
 	} = $props();
 
 	function partnerName(l) {
@@ -25,6 +29,14 @@
 		const t = teams[tid];
 		return t && typeof t === "object" && t.color ? t.color : null;
 	}
+
+	let linksEl = $state();
+	$effect(() => {
+		const id = hoveredTeammate;
+		if (id == null || !linksEl) return;
+		const active = linksEl.querySelector(".partner-chip.active");
+		active?.scrollIntoView({ block: "nearest" });
+	});
 </script>
 
 {#if node}
@@ -95,10 +107,10 @@
 
 			{#if partners.length}
 				<div class="hud-section-title">Teammates</div>
-				<div class="hud-links">
+				<div class="hud-links" bind:this={linksEl}>
 					{#each partners as l (linkKey(l))}
 						<div
-							class="partner-chip"
+							class="partner-chip {hoveredTeammate === partnerId(l) ? "active" : ""}"
 							role="button"
 							tabindex="0"
 							onmouseenter={() => onPartnerHover?.(partnerId(l))}
@@ -116,6 +128,36 @@
 						>
 							<span class="partner-name">{partnerName(l)}</span>
 							<span class="partner-weight">{l.w}×</span>
+						</div>
+					{/each}
+				</div>
+			{/if}
+
+			{#if playerMatches.length}
+				<div class="hud-section-title">Matches</div>
+				<div class="hud-links">
+					{#each playerMatches as m (m.g.eventId)}
+						<div
+							class="game-row {activeMatch === m.g.eventId ? "active" : ""}"
+							role="button"
+							tabindex="0"
+							title="Show players who took part"
+							onclick={() => onMatchClick(m.g)}
+							onkeydown={(e) => {
+								if (e.key === "Enter" || e.key === " ") {
+									e.preventDefault();
+									onMatchClick(m.g);
+								}
+							}}
+						>
+							<span class="game-date">{m.date}</span>
+							<span class="game-match">
+								<span class="game-team {m.myTeamId === m.winner ? "winner" : ""} mine">
+									{teamName(teams, m.myTeamId)}
+								</span>
+								<span class="game-score">{m.my ?? "?"}–{m.opp ?? "?"}</span>
+								<span class="game-team {m.oppId === m.winner ? "winner" : ""}">{teamName(teams, m.oppId)}</span>
+							</span>
 						</div>
 					{/each}
 				</div>

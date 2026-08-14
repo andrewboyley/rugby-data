@@ -79,10 +79,20 @@ class CoOccurrenceGraph:
             if not date:
                 continue
             competitors = [
-                {"teamId": comp.team_id, "score": comp.score}
+                {
+                    "teamId": comp.team_id,
+                    "home": bool(comp.home),
+                    "score": comp.score,
+                    "roster": [
+                        {"playerId": entry.player_id, "jersey": entry.jersey}
+                        for entry in comp.roster
+                    ],
+                }
                 for comp in game.competitors
             ]
-            games.append({"date": date, "competitors": competitors})
+            games.append(
+                {"eventId": game.event_id, "date": date, "competitors": competitors}
+            )
 
         return {
             "type": "player-co-occurrence",
