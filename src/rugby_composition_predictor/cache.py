@@ -14,6 +14,13 @@ from typing import Any
 from .config import CACHE_PROCESSED_KEY, CACHE_SOFT_WRITE_LIMIT
 
 
+def _norm_processed_key(key: int | str) -> str:
+    """Normalize a processed key to string form with source prefix if int."""
+    if isinstance(key, int):
+        return f"espn:{key}"
+    return key
+
+
 class ApiCache:
     def __init__(self, path: Path, soft_write_limit: int = CACHE_SOFT_WRITE_LIMIT):
         self._path = path
@@ -24,7 +31,7 @@ class ApiCache:
 
     # ---- loading ----
 
-    def _load(self) -> tuple[dict, set[int]]:
+    def _load(self) -> tuple[dict, set[str]]:
         try:
             with open(self._path) as f:
                 data = json.load(f)
@@ -33,8 +40,14 @@ class ApiCache:
         except json.JSONDecodeError as e:
             self._recover_corrupt(e)
             return {}, set()
-        processed = data.pop(CACHE_PROCESSED_KEY, [])
-        return data, {int(e) for e in processed}
+        raw_processed = data.pop(CACHE_PROCESSED_KEY, [])
+        processed: set[str] = set()
+        for item in raw_processed:
+            if isinstance(item, int):
+                processed.add(f"espn:{item}")
+            else:
+                processed.add(str(item))
+        return data, processed
 
     def _recover_corrupt(self, error: json.JSONDecodeError) -> None:
         backup = self._path.with_suffix(self._path.suffix + ".corrupt")
@@ -66,17 +79,17 @@ class ApiCache:
 
     # ---- processed tracking ----
 
-    def mark_processed(self, event_id: int) -> None:
+    def mark_processed(self, event_id: int | str) -> None:
         with self._lock:
-            self._processed.add(event_id)
+            self._processed.add(_norm_processed_key(event_id))
 
-    def is_processed(self, event_id: int) -> bool:
+    def is_processed(self, event_id: int | str) -> bool:
         with self._lock:
-            return event_id in self._processed
+            return _norm_processed_key(event_id) in self._processed
 
-    def reset_processed_to(self, event_ids: set[int]) -> None:
+    def reset_processed_to(self, event_ids: set[int | str]) -> None:
         with self._lock:
-            self._processed = set(event_ids)
+            self._processed = {_norm_processed_key(e) for e in event_ids}
 
     # ---- persistence ----
 

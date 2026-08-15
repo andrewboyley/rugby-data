@@ -71,18 +71,39 @@ src/    rugby_composition_predictor package
     {
       "eventId": 281087,
       "date": "2016-08-20T15:05Z",
+      "venueId": "rims:62",
+      "leagueId": "rims:Tour 2016",
       "competitors": [
-        {"teamId": 5, "home": true,  "score": 30,
+        {"teamId": 5, "home": true,  "score": 30, "coachId": "13193",
          "roster": [{"playerId": 144732, "jersey": 15}]},
-        {"teamId": 10, "home": false, "score": 23,
+        {"teamId": 10, "home": false, "score": 23, "coachId": "3114",
          "roster": [{"playerId": 141716, "jersey": 15}]}
       ]
     }
   ],
   "teams":  {"5": "South Africa", "10": "Argentina"},
-  "players": {"144732": "Johan Goosen"}
+  "players": {"144732": "Johan Goosen"},
+  "venues":  {"rims:62": {"name": "Eden Park", "city": "Auckland",
+                          "country": "New Zealand"},
+              "espn:98000": {"name": "Teufaiva Stadium", "city": "Nuku'alofa",
+                             "country": "Tonga"}},
+  "leagues": {"rims:Tour 2016": {"name": "Tour 2016", "abbreviation": "Tour 2016"},
+              "espn:10659": {"name": "International Test Match",
+                             "abbreviation": "International Test Match"}},
+  "coaches": {"13193": "Steve Hansen", "3114": "Warren Gatland"}
 }
 ```
 
+- `venues`: keyed by source-prefixed id (e.g. `"rims:62"`, `"espn:98000"`)
+  → `{name, city, country}`. RIMS ids come from the match's `venue`, ESPN ids
+  from `gameInfo.venue`.
+- `leagues`: keyed by source-prefixed id (e.g. `"rims:Tour 2016"`,
+  `"espn:10659"`) → `{name, abbreviation}`. RIMS ids derive from the match's
+  `competition`, ESPN ids from `header.league`.
+- `coaches`: keyed by player id → display name. Populated from competitor
+  roster entries flagged as coach / management in the source feed.
+
 Only complete games are kept: both competitors present, non-empty rosters,
-and both scores. Roster jerseys 1-15 are starters, 16-23 bench.
+and both scores. Roster jerseys 1-15 are starters, 16-23 bench. Each
+`games[]` entry now carries `venueId` and `leagueId`, and each
+`competitors[]` entry carries `coachId`.

@@ -16,17 +16,28 @@ from .config import (
 from .dataset import Dataset
 from .graph import CoOccurrenceGraph
 from .reporting import RichProgressBar
+from .rims_api import RimsApi
 
 
 def build_dataset(
     dataset_path: Path = DEFAULT_DATASET_PATH,
     cache_path: Path = DEFAULT_CACHE_PATH,
     team_ids: list[str] | None = None,
+    source: str = "rims-first",
 ) -> None:
     cache = ApiCache(cache_path)
     dataset = Dataset.load(dataset_path)
-    api = EspnApi(cache)
-    builder = DatasetBuilder(api, cache, dataset, dataset_path, team_ids=team_ids)
+    espn_api = EspnApi(cache)
+    rims_api = RimsApi(cache)
+    builder = DatasetBuilder(
+        rims_api,
+        espn_api,
+        cache,
+        dataset,
+        dataset_path,
+        team_ids=team_ids,
+        source=source,
+    )
 
     if team_ids:
         scope = ", ".join(team_ids)
@@ -80,6 +91,12 @@ def main(argv=None) -> None:
         default=None,
         help="restrict to a single team id (default: all international teams)",
     )
+    dataset_cmd.add_argument(
+        "--source",
+        default="rims-first",
+        choices=["rims-first", "rims", "espn"],
+        help="data source: rims-first (default), rims, or espn",
+    )
 
     graph_cmd = sub.add_parser("graph", help="build graph.json")
     graph_cmd.add_argument(
@@ -97,6 +114,11 @@ def main(argv=None) -> None:
 
     if args.command == "dataset":
         team_ids = [args.team] if args.team else None
-        build_dataset(Path(args.output), Path(args.cache), team_ids=team_ids)
+        build_dataset(
+            Path(args.output),
+            Path(args.cache),
+            team_ids=team_ids,
+            source=args.source,
+        )
     elif args.command == "graph":
         build_graph(Path(args.input), Path(args.output))

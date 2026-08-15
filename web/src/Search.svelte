@@ -1,7 +1,13 @@
-<script>
-	import { teamName } from "./lib.js";
+<script lang="ts">
+	import { teamName } from "./lib.ts";
+	import type { Player, RawTeamInfo } from "./types.ts";
 
-	let { nodes, teams, onPick, selectedId } = $props();
+	let { nodes, teams, onPick, selectedId }: {
+		nodes: Player[];
+		teams: Record<number, RawTeamInfo>;
+		onPick: (d: Player) => void;
+		selectedId: number | null;
+	} = $props();
 
 	let q = $state("");
 	let open = $state(false);
@@ -72,7 +78,7 @@
 					<b>{d.name}</b> &middot; {d.app} apps
 					<span class="team">
 						{#if d.teams.length}
-							{d.teams.map(tid => teamName(teams, tid)).join(', ')}
+							{d.teams.map((tid) => teamName(teams, tid)).join(", ")}
 						{:else}
 							{teamName(teams, d.team)}
 						{/if}

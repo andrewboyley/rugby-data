@@ -7,11 +7,30 @@ shared matches.
 
 import json
 from collections import Counter, defaultdict
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 
+from .config import (
+    HOME_KIT_COLOURS,
+    INTERNATIONAL_TEAM_IDS,
+    RIMS_TEAM_IDS,
+    SECONDARY_KIT_COLOURS,
+)
 from .dataset import Dataset
 from .storage import atomic_write_text
+
+
+def _team_out(info: object, espn_id: int | None) -> dict:
+    """Emit a graph team record, preferring curated kit colours over any
+    value carried by the raw dataset entry."""
+    name = info.get("name") if isinstance(info, dict) else str(info)
+    color = HOME_KIT_COLOURS.get(str(espn_id)) if espn_id is not None else None
+    alt = SECONDARY_KIT_COLOURS.get(str(espn_id)) if espn_id is not None else None
+    if color is None and isinstance(info, dict):
+        color = info.get("color")
+    if alt is None and isinstance(info, dict):
+        alt = info.get("alternateColor")
+    return {"name": name, "color": color, "alternateColor": alt}
 
 
 class CoOccurrenceGraph:
@@ -21,17 +40,37 @@ class CoOccurrenceGraph:
 
     def build_dict(self) -> dict:
         """Compute the graph and return its serializable form."""
-        weights: dict[tuple[int, int], int] = defaultdict(int)
-        edge_dates: dict[tuple[int, int], set] = defaultdict(set)
-        appearances: dict[int, int] = defaultdict(int)
-        player_dates: dict[int, set] = defaultdict(set)
-        team_counts: dict[int, Counter] = defaultdict(Counter)
-        team_player_dates: dict[int, dict[int, set]] = defaultdict(lambda: defaultdict(set))
-        jersey_counts: dict[int, Counter] = defaultdict(Counter)
+        # Team ids in the dataset come from the RIMS API (e.g. 39 = South
+        # Africa) while the curated colour/identity configs are keyed by ESPN
+        # ids (e.g. 5 = South Africa). Normalise to ESPN ids for lookups and
+        # restrict the graph to national (international) teams only.
+        rims_to_es = {int(v): int(k) for k, v in RIMS_TEAM_IDS.items()}
+        intl_es = {int(t) for t in INTERNATIONAL_TEAM_IDS}
+
+        def to_espid(tid: int) -> int | None:
+            if tid in rims_to_es:
+                return rims_to_es[tid]
+            if tid in intl_es:
+                return tid
+            return None
+
+        def is_intl(tid: int) -> bool:
+            return to_espid(tid) in intl_es
+
+        weights: dict[tuple[str, str], int] = defaultdict(int)
+        edge_dates: dict[tuple[str, str], set] = defaultdict(set)
+        appearances: dict[str, int] = defaultdict(int)
+        player_dates: dict[str, set] = defaultdict(set)
+        team_counts: dict[str, Counter] = defaultdict(Counter)
+        team_player_dates: dict[str, dict[int, set]] = defaultdict(
+            lambda: defaultdict(set)
+        )
+        jersey_counts: dict[str, Counter] = defaultdict(Counter)
 
         for game in self._dataset.games:
             date = (game.date or "")[:10]
-            for competitor in game.competitors:
+            intl_competitors = [c for c in game.competitors if is_intl(c.team_id)]
+            for competitor in intl_competitors:
                 for entry in competitor.roster:
                     player_id = entry.player_id
                     appearances[player_id] += 1
@@ -78,6 +117,25 @@ class CoOccurrenceGraph:
             date = (game.date or "")[:10]
             if not date:
                 continue
+
+            venue = None
+            if game.venue_id:
+                v = self._dataset.venues.get(game.venue_id)
+                if isinstance(v, dict):
+                    venue = {
+                        "name": v.get("name"),
+                        "city": v.get("city"),
+                        "country": v.get("country"),
+                    }
+            league = None
+            if game.league_id:
+                lg = self._dataset.leagues.get(game.league_id)
+                if isinstance(lg, dict):
+                    league = {
+                        "name": lg.get("name"),
+                        "abbreviation": lg.get("abbreviation"),
+                    }
+
             competitors = [
                 {
                     "teamId": comp.team_id,
@@ -87,11 +145,23 @@ class CoOccurrenceGraph:
                         {"playerId": entry.player_id, "jersey": entry.jersey}
                         for entry in comp.roster
                     ],
+                    "coach": self._dataset.coach_name(comp.coach_id)
+                    if comp.coach_id
+                    else None,
                 }
                 for comp in game.competitors
+                if is_intl(comp.team_id)
             ]
+            if len(competitors) < 2:
+                continue
             games.append(
-                {"eventId": game.event_id, "date": date, "competitors": competitors}
+                {
+                    "eventId": game.event_id,
+                    "date": date,
+                    "competitors": competitors,
+                    "venue": venue,
+                    "league": league,
+                }
             )
 
         return {
@@ -101,7 +171,11 @@ class CoOccurrenceGraph:
             "dateMax": all_dates[-1] if all_dates else None,
             "numPlayers": len(appearances),
             "numEdges": len(edges),
-            "teams": {str(k): v for k, v in self._dataset.teams.items()},
+            "teams": {
+                str(tid): _team_out(info, to_espid(tid))
+                for tid, info in self._dataset.teams.items()
+                if is_intl(tid)
+            },
             "players": {str(k): v for k, v in self._dataset.players.items()},
             "appearances": {str(k): v for k, v in appearances.items()},
             "playerDates": {str(k): sorted(v) for k, v in player_dates.items()},
@@ -117,7 +191,9 @@ class CoOccurrenceGraph:
         }
 
     def _compute_win_rates(
-        self, weights: dict[tuple[int, int], int], edge_dates: dict[tuple[int, int], set]
+        self,
+        weights: dict[tuple[str, str], int],
+        edge_dates: dict[tuple[str, str], set],
     ) -> dict[str, float]:
         games_by_date: dict[str, list] = {}
         for game in self._dataset.games:
@@ -165,7 +241,7 @@ class CoOccurrenceGraph:
 
     def summarize(self) -> str:
         data = self.build_dict()
-        degrees: dict[int, int] = defaultdict(int)
+        degrees: dict[str, int] = defaultdict(int)
         for edge in data["edges"]:
             degrees[edge["playerA"]] += 1
             degrees[edge["playerB"]] += 1
@@ -190,7 +266,7 @@ class CoOccurrenceGraph:
             )
         return "\n".join(lines)
 
-    def _name(self, player_id: int) -> str:
+    def _name(self, player_id: str) -> str:
         return self._dataset.player_name(player_id) or str(player_id)
 
     @staticmethod

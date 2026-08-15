@@ -9,12 +9,12 @@ import path from "node:path";
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// Vite dev and preview servers serve the app bundle, not the repo's data/.
-// Serve the real files from the repo's data/ directory on /data/*.
-// JSON payloads (12 MB graph.json) are pre-compressed once per file version and
-// served brotli/gzip so the browser does not download raw megabytes.
-const encCache = new Map();
-async function readCached(target) {
+const encCache = new Map<string, {
+  raw: Buffer;
+  br: Buffer;
+  gzip: Buffer;
+}>();
+async function readCached(target: string) {
   const stat = statSync(target);
   const key = `${target}:${stat.size}:${stat.mtimeMs}`;
   let entry = encCache.get(key);
@@ -34,7 +34,7 @@ async function readCached(target) {
 }
 
 function repoData() {
-  const handleData = (req, res, next) => {
+  const handleData = (req: any, res: any, next: () => void) => {
     const target = path.join(repoRoot, "data", req.url);
     const root = path.join(repoRoot, "data");
     const safe =
@@ -46,15 +46,12 @@ function repoData() {
       return;
     }
     const ext = path.extname(target).toLowerCase();
-    if (ext === ".json") {
-      res.setHeader("Content-Type", "application/json");
-    } else {
-      res.setHeader("Content-Type", "application/octet-stream");
-    }
+    res.setHeader("Content-Type", ext === ".json" ? "application/json" : "application/octet-stream");
     const accept = req.headers["accept-encoding"] || "";
     readCached(target)
       .then((entry) => {
-        let body, encoding;
+        let body: Buffer;
+        let encoding: string | undefined;
         if (/\bbr\b/.test(accept)) {
           body = entry.br;
           encoding = "br";
@@ -75,10 +72,10 @@ function repoData() {
   };
   return {
     name: "repo-data",
-    configureServer(server) {
+    configureServer(server: any) {
       server.middlewares.use("/data", handleData);
     },
-    configurePreviewServer(server) {
+    configurePreviewServer(server: any) {
       server.middlewares.use("/data", handleData);
     },
   };

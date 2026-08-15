@@ -12,11 +12,17 @@ class Dataset:
         self,
         games: list[Game] | None = None,
         teams: dict[int, dict] | None = None,
-        players: dict[int, str] | None = None,
+        players: dict[str, str] | None = None,
+        venues: dict[str, dict] | None = None,
+        leagues: dict[str, dict] | None = None,
+        coaches: dict[str, str] | None = None,
     ):
         self.games = games or []
         self.teams = teams or {}
         self.players = players or {}
+        self.venues = venues or {}
+        self.leagues = leagues or {}
+        self.coaches = coaches or {}
         self._lock = threading.Lock()
 
     @classmethod
@@ -35,17 +41,26 @@ class Dataset:
         return cls(
             games=[game_from_dict(g) for g in data.get("games", [])],
             teams=teams,
-            players={int(k): v for k, v in data.get("players", {}).items()},
+            players={str(k): v for k, v in data.get("players", {}).items()},
+            venues={str(k): v for k, v in data.get("venues", {}).items()},
+            leagues={str(k): v for k, v in data.get("leagues", {}).items()},
+            coaches={str(k): v for k, v in data.get("coaches", {}).items()},
         )
 
     def save(self, path: Path) -> None:
         with self._lock:
             teams = dict(self.teams)
             players = dict(self.players)
+            venues = dict(self.venues)
+            leagues = dict(self.leagues)
+            coaches = dict(self.coaches)
         payload = {
             "games": [game_to_dict(g) for g in self.games],
             "teams": teams,
             "players": players,
+            "venues": venues,
+            "leagues": leagues,
+            "coaches": coaches,
         }
         atomic_write_json(path, payload)
 
@@ -88,9 +103,60 @@ class Dataset:
                 "alternateColor": alternate_color,
             }
 
-    def player_name(self, player_id: int) -> str | None:
+    def player_name(self, player_id: str) -> str | None:
         return self.players.get(player_id)
 
-    def register_player(self, player_id: int, name: str) -> None:
+    def register_player(self, player_id: str, name: str) -> None:
         with self._lock:
             self.players[player_id] = name
+
+    # ---- venues ----
+
+    def venue_name(self, venue_id: str) -> str | None:
+        entry = self.venues.get(venue_id)
+        if isinstance(entry, dict):
+            return entry.get("name")
+        return entry if isinstance(entry, str) else None
+
+    def register_venue(
+        self,
+        venue_id: str,
+        name: str,
+        city: str | None = None,
+        country: str | None = None,
+    ) -> None:
+        with self._lock:
+            self.venues[venue_id] = {
+                "name": name,
+                "city": city,
+                "country": country,
+            }
+
+    # ---- leagues ----
+
+    def league_name(self, league_id: str) -> str | None:
+        entry = self.leagues.get(league_id)
+        if isinstance(entry, dict):
+            return entry.get("name")
+        return entry if isinstance(entry, str) else None
+
+    def register_league(
+        self,
+        league_id: str,
+        name: str,
+        abbreviation: str | None = None,
+    ) -> None:
+        with self._lock:
+            self.leagues[league_id] = {
+                "name": name,
+                "abbreviation": abbreviation,
+            }
+
+    # ---- coaches ----
+
+    def coach_name(self, coach_id: str) -> str | None:
+        return self.coaches.get(coach_id)
+
+    def register_coach(self, coach_id: str, name: str) -> None:
+        with self._lock:
+            self.coaches[coach_id] = name

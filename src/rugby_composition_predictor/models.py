@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 
 @dataclass
 class RosterEntry:
-    player_id: int
-    jersey: int
+    player_id: str
+    jersey: int | None
 
 
 @dataclass
@@ -15,6 +15,7 @@ class Competitor:
     home: bool
     score: int | None
     roster: list[RosterEntry] = field(default_factory=list)
+    coach_id: str | None = None
 
     def is_complete(self) -> bool:
         return bool(self.roster) and self.score is not None
@@ -22,9 +23,11 @@ class Competitor:
 
 @dataclass
 class Game:
-    event_id: int
+    event_id: str
     date: str | None
     competitors: list[Competitor] = field(default_factory=list)
+    venue_id: str | None = None
+    league_id: str | None = None
 
     def is_complete(self) -> bool:
         return len(self.competitors) == 2 and all(
@@ -34,7 +37,7 @@ class Game:
 
 def roster_from_dict(data: dict) -> RosterEntry:
     return RosterEntry(
-        player_id=int(data["playerId"]),
+        player_id=str(data["playerId"]),
         jersey=_parse_jersey(data["jersey"]),
     )
 
@@ -49,6 +52,7 @@ def competitor_from_dict(data: dict) -> Competitor:
         home=bool(data["home"]),
         score=data["score"],
         roster=[roster_from_dict(e) for e in data.get("roster", [])],
+        coach_id=data.get("coachId"),
     )
 
 
@@ -58,14 +62,17 @@ def competitor_to_dict(comp: Competitor) -> dict:
         "home": comp.home,
         "score": comp.score,
         "roster": [roster_to_dict(e) for e in comp.roster],
+        "coachId": comp.coach_id,
     }
 
 
 def game_from_dict(data: dict) -> Game:
     return Game(
-        event_id=int(data["eventId"]),
+        event_id=str(data["eventId"]),
         date=data.get("date"),
         competitors=[competitor_from_dict(c) for c in data.get("competitors", [])],
+        venue_id=data.get("venueId"),
+        league_id=data.get("leagueId"),
     )
 
 
@@ -74,13 +81,17 @@ def game_to_dict(game: Game) -> dict:
         "eventId": game.event_id,
         "date": game.date,
         "competitors": [competitor_to_dict(c) for c in game.competitors],
+        "venueId": game.venue_id,
+        "leagueId": game.league_id,
     }
 
 
-def _parse_jersey(value) -> int:
+def _parse_jersey(value) -> int | None:
     """Jerseys arrive as numeric strings, but guard against odd values."""
+    if value is None:
+        return None
     if isinstance(value, int):
         return value
     if isinstance(value, str) and value.isdigit():
         return int(value)
-    raise ValueError(f"cannot parse jersey {value!r}")
+    return None

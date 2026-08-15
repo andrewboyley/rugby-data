@@ -6,6 +6,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
 
 CORE_API_BASE = "https://sports.core.api.espn.com/v2/sports/rugby"
+
+# ESPN "site web" API (site.web.api.espn.com) — the editorial/site endpoint
+# that powers espn.com's public pages (incl. the lineups page). Unlike the
+# CORE API above, its event `summary` response carries rugby rosters inline.
+SITE_WEB_API_BASE = "https://site.web.api.espn.com/apis/site/v2/sports/rugby"
 SOUTH_AFRICA_TEAM_ID = "5"
 YEARS = range(2016, 2027)
 
@@ -13,8 +18,29 @@ YEARS = range(2016, 2027)
 # participants across recent editions; match discovery iterates these teams so
 # any competition a national team enters is captured regardless of new leagues.
 INTERNATIONAL_TEAM_IDS = [
-    "1", "2", "3", "4", "5", "6", "8", "9", "10", "11", "12", "14",
-    "15", "16", "20", "23", "25", "27", "29", "57", "81", "82", "289243",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+    "14",
+    "15",
+    "16",
+    "20",
+    "23",
+    "25",
+    "27",
+    "29",
+    "57",
+    "81",
+    "82",
+    "289243",
 ]
 
 # Home kit colours for national teams, keyed by ESPN team id. The ESPN API
@@ -113,3 +139,54 @@ USER_AGENT = "Mozilla/5.0"
 
 CACHE_SOFT_WRITE_LIMIT = 100
 CACHE_PROCESSED_KEY = "__processed__"
+
+# World Rugby RIMS API (api.wr-rims-prod.pulselive.com) — primary datasource
+RIMS_API_BASE = "https://api.wr-rims-prod.pulselive.com/rugby/v3"
+RIMS_HEADERS = {
+    "account": "worldrugby",
+    "x-pulse-application-version": "v1.7.5",
+    "x-pulse-application-name": "web",
+    "origin": "https://www.world.rugby",
+    "referer": "https://www.world.rugby/",
+}
+RIMS_RATE_LIMIT_PER_MIN = 45
+RIMS_MAX_WORKERS = 1
+
+# RIMS team ids for international teams (primary 15s sides).
+# Keys are ESPN team ids (str), values are RIMS team ids (str).
+# Sourced from RIMS match data and team listing (type=Country).
+RIMS_TEAM_IDS: dict[str, str] = {
+    "1": "34",  # England
+    "2": "35",  # Scotland
+    "3": "36",  # Ireland
+    "4": "33",  # Wales
+    "5": "39",  # South Africa
+    "6": "38",  # Australia
+    "8": "37",  # New Zealand
+    "9": "42",  # France
+    "10": "40",  # Argentina
+    "11": "51",  # USA
+    "12": "52",  # Romania
+    "14": "46",  # Fiji
+    "15": "45",  # Samoa
+    "16": "47",  # Tonga
+    "20": "41",  # Italy
+    "23": "49",  # Japan
+    "25": "50",  # Canada
+    "27": "44",  # Portugal
+    "29": "68",  # Uruguay
+    "57": "756",  # Russia
+    "81": "720",  # Georgia
+    "82": "58",  # Namibia
+    "33": "703",  # Brazil
+    "289211": "43",  # Spain
+    "289243": "708",  # Chile
+    "289267": "699",  # Belgium
+    "289210": "735",  # Kenya
+    "289268": "725",  # Hong Kong
+    "289324": "64",  # Netherlands
+    "289356": "57",  # Zimbabwe
+    "289454": "736",  # Korea
+    "289514": "751",  # Paraguay
+    "289530": "2389",  # Burkina Faso
+}

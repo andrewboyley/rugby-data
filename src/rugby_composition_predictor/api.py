@@ -4,6 +4,7 @@ import json
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 
 from .cache import ApiCache
@@ -71,6 +72,13 @@ class EspnApi:
             try:
                 with urllib.request.urlopen(request, timeout=self._timeout) as response:
                     return json.load(response)
+            except urllib.error.HTTPError as e:
+                if 400 <= e.code < 500 and e.code != 429:
+                    raise
+                print(
+                    f"  [retry {attempt}] {self._describe(url)}: {e}", file=sys.stderr
+                )
+                time.sleep(2**attempt)
             except (OSError, json.JSONDecodeError) as e:
                 print(
                     f"  [retry {attempt}] {self._describe(url)}: {e}", file=sys.stderr
@@ -106,5 +114,5 @@ def _competitor_id(path: str) -> str:
     return path.split("competitors/")[-1].split("/")[0]
 
 
-def event_id_from_url(url: str) -> int:
-    return int(url.rsplit("/", 1)[-1].split("?")[0])
+def event_id_from_url(url: str) -> str:
+    return url.rsplit("/", 1)[-1].split("?")[0]

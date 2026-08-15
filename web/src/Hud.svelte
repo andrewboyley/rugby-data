@@ -1,5 +1,6 @@
-<script>
-	import { teamName } from "./lib.js";
+<script lang="ts">
+	import { teamName } from "./lib.ts";
+	import type { Player, PlayerMatch, EdgeSelection as _EdgeSelection } from "./types.ts";
 
 	let {
 		node,
@@ -14,23 +15,36 @@
 		playerMatches = [],
 		onMatchClick = () => {},
 		activeMatch = null,
+	}: {
+		node: Player | null | undefined;
+		deg: number;
+		partners: { source: { id: number; name: string }; target: { id: number; name: string }; w: number }[];
+		teams: Record<number, { name: string; color: string }>;
+		onClear: () => void;
+		onPartnerHover: (id: number | null) => void;
+		onPartnerClick: (l: { source: { id: number }; target: { id: number } }) => void;
+		hoveredTeammate: number | null;
+		onTeamZoom: (tid: number) => void;
+		playerMatches: PlayerMatch[];
+		onMatchClick: (game: any) => void;
+		activeMatch: number | null;
 	} = $props();
 
-	function partnerName(l) {
-		return l.source.id === node.id ? l.target.name : l.source.name;
+	function partnerName(l: { source: { id: number; name: string }; target: { id: number; name: string } }) {
+		return l.source.id === node!.id ? l.target.name : l.source.name;
 	}
-	function partnerId(l) {
-		return l.source.id === node.id ? l.target.id : l.source.id;
+	function partnerId(l: { source: { id: number }; target: { id: number } }) {
+		return l.source.id === node!.id ? l.target.id : l.source.id;
 	}
-	function linkKey(l) {
+	function linkKey(l: { source: { id: number }; target: { id: number } }) {
 		return `${l.source.id}-${l.target.id}`;
 	}
-	function teamColor(tid) {
+	function teamColor(tid: number) {
 		const t = teams[tid];
-		return t && typeof t === "object" && t.color ? t.color : null;
+		return t && typeof t === "object" && "color" in t && t.color ? (t.color as string) : null;
 	}
 
-	let linksEl = $state();
+	let linksEl = $state<HTMLDivElement>();
 	$effect(() => {
 		const id = hoveredTeammate;
 		if (id == null || !linksEl) return;
@@ -75,15 +89,15 @@
 					role="button"
 					tabindex="0"
 					title="Zoom to {teamName(teams, node.team)}"
-					onclick={() => onTeamZoom(node.team)}
+					onclick={() => onTeamZoom(node.team!)}
 					onkeydown={(e) => {
 						if (e.key === "Enter" || e.key === " ") {
 							e.preventDefault();
-							onTeamZoom(node.team);
+							onTeamZoom(node.team!);
 						}
 					}}
 				>
-					<span class="team-dot" style="background: {teamColor(node.team) || 'var(--muted)'}"></span>
+					<span class="team-dot" style="background: {teamColor(node.team!) || 'var(--muted)'}"></span>
 					{teamName(teams, node.team)}
 				</div>
 			{/if}

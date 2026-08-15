@@ -1,17 +1,22 @@
-<script>
-	import { teamName } from "./lib.js";
+<script lang="ts">
+	import { teamName } from "./lib.ts";
+	import type { EdgeSelection, Game, Competitor } from "./types.ts";
 
-	let { edge, gamesByDate, teams, onClear, onMatchClick = () => {}, activeMatch = null } = $props();
+	let { edge, gamesByDate, teams, onClear, onMatchClick = () => {}, activeMatch = null }: {
+		edge: EdgeSelection | null;
+		gamesByDate: Map<string, Game[]>;
+		teams: Record<number, { name: string; color: string }>;
+		onClear: () => void;
+		onMatchClick: (g: Game) => void;
+		activeMatch: { eventId: number } | null;
+	} = $props();
 
-	function gameRow(d) {
+	function gameRow(d: string) {
 		const games = gamesByDate?.get(d) || [];
-		// A date can host several matches (e.g. a whole Six Nations round on one
-		// day). The pair's games are the ones involving their team; prefer that
-		// match over an unrelated game on the same date.
 		const g =
-			games.find((x) => edge.team != null && (x.competitors || []).some((c) => c.teamId === edge.team)) ||
+			games.find((x) => edge!.team != null && (x.competitors || []).some((c: Competitor) => c.teamId === edge!.team!)) ||
 			games[0];
-		if (!g) return { date: d, home: null, away: null, score1: null, score2: null, homeMine: false, awayMine: false, homeWin: false, awayWin: false, g: null };
+		if (!g) return { date: d, home: null as string | null, away: null as string | null, score1: null as number | null, score2: null as number | null, homeMine: false, awayMine: false, homeWin: false, awayWin: false, 			g: null as Game | null };
 		const home = g.competitors.find((c) => c.home) ?? g.competitors[0];
 		const away = g.competitors.find((c) => !c.home) ?? g.competitors[1];
 		const score1 = home?.score ?? 0;
@@ -22,8 +27,8 @@
 			away: away ? teamName(teams, away.teamId) ?? null : null,
 			score1,
 			score2,
-			homeMine: home != null && edge.team != null && home.teamId === edge.team,
-			awayMine: away != null && edge.team != null && away.teamId === edge.team,
+			homeMine: home != null && edge!.team != null && home.teamId === edge!.team,
+			awayMine: away != null && edge!.team != null && away.teamId === edge!.team,
 			homeWin: score1 > score2,
 			awayWin: score2 > score1,
 			g,
@@ -60,11 +65,11 @@
 							role="button"
 							tabindex="0"
 							title="Show players who took part"
-							onclick={() => onMatchClick(row.g)}
+							onclick={() => onMatchClick(row.g!)}
 							onkeydown={(e) => {
 								if (e.key === "Enter" || e.key === " ") {
 									e.preventDefault();
-									onMatchClick(row.g);
+									onMatchClick(row.g!);
 								}
 							}}
 						>
