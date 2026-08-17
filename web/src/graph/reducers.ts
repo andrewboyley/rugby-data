@@ -3,7 +3,6 @@
 import type Graph from "graphology";
 import {
   ACTIVE_BORDER_COLOR,
-  DIMMED_NODE_COLOR,
   SHARED_MATCH_COLOR,
   applyAlpha,
   needsBorder,
@@ -17,12 +16,14 @@ export type StateGetters = {
   focusId: () => string | null;
   focusNeighbors: () => Set<string>;
   hoveredId: () => string | null;
+  hoveredIds: () => Set<string>;
   hoveredOther: () => string | null;
   pinnedId: () => string | null;
   pinnedNeighbors: () => Set<string>;
   pinnedEdge: () => string | null;
   edgePartnerId: () => string | null;
   hoverTeamId: () => number | null;
+  hoverMatchNodeIds: () => Set<string> | null;
   showEdges: () => boolean;
   alphaMin: () => number;
   alphaMax: () => number;
@@ -37,18 +38,18 @@ export function edgeBaseColor(graph: Graph, attrs: Record<string, unknown>): str
 export function createNodeReducer(state: StateGetters) {
   return (node: string, data: Record<string, unknown>): Record<string, unknown> => {
     const res = { ...data };
+    const hoveredIds = state.hoveredIds();
     const focus = state.focusId();
-    const isHovered = node === state.hoveredId() || node === state.hoveredOther();
+    const hoveredOther = state.hoveredOther();
+    const isHovered = hoveredIds.has(node) || node === state.hoveredId() || node === hoveredOther;
     const isActive = state.pinnedId() != null && node === state.pinnedId();
-    const partner = state.edgePartnerId();
-    const isSecondaryActive = node === partner;
     const isNeighbor = state.focusNeighbors().has(node);
 
     res.isActive = isActive;
-    res.isSecondary = isSecondaryActive;
+    res.isSecondary = false;
     res.isHovered = isHovered;
 
-    if (isActive || isSecondaryActive || isHovered) {
+    if (isActive || isHovered) {
       res.forceLabel = true;
     } else {
       res.label = "";
@@ -57,25 +58,51 @@ export function createNodeReducer(state: StateGetters) {
     res.type = "border";
 
     const hoverTeamId = state.hoverTeamId();
-    if (hoverTeamId != null) {
-      const nodeTeam = data.team as number | null | undefined;
-      if (nodeTeam === hoverTeamId) {
-        res.forceLabel = true;
-      } else {
-        res.label = "";
-        res.color = DIMMED_NODE_COLOR;
-        res.borderColor = "transparent";
-      }
+    const teamMatch = hoverTeamId != null && (data.team as number | null | undefined) === hoverTeamId;
+    const jerseyMatch = hoveredIds.has(node);
+    if (teamMatch || jerseyMatch) {
+      res.forceLabel = true;
+    } else if ((hoverTeamId != null || hoveredIds.size > 0) && !isHovered) {
+      // Only dim non-hovered nodes
+      res.label = "";
+      const originalColor = (res.color as string) || (data.color as string);
+      res.color = applyAlpha(originalColor, 0.15);
+      res.borderColor = "transparent";
     }
 
-    if (focus != null) {
+    const hoverMatchIds = state.hoverMatchNodeIds();
+    const inMatch = hoverMatchIds != null && hoverMatchIds.size > 0 && hoverMatchIds.has(node);
+    const hasMatchHover = hoverMatchIds != null && hoverMatchIds.size > 0;
+
+    if (hasMatchHover) {
+      // Match hover active: only match nodes + pinned node are fully visible
+      if (!inMatch && !isActive) {
+        res.label = "";
+        const originalColor = (res.color as string) || (data.color as string);
+        res.color = applyAlpha(originalColor, 0.15);
+        res.borderColor = "transparent";
+      } else {
+        res.forceLabel = true;
+      }
+    } else if (focus != null) {
+      // Pinned node active, no match hover
       if (isActive) {
         res.type = "activeBorder";
-      } else if (isSecondaryActive) {
-        res.borderColor = ACTIVE_BORDER_COLOR;
-      } else if (!isSecondaryActive && !isHovered && !isNeighbor) {
+      } else if (isHovered && isNeighbor) {
+        // Hovered neighbor - keep visible
+      } else if (isNeighbor && !isHovered) {
+        // Other neighbors get dimmed when a neighbor is hovered
+        if (hoveredOther != null) {
+          res.label = "";
+          const originalColor = (res.color as string) || (data.color as string);
+          res.color = applyAlpha(originalColor, 0.15);
+          res.borderColor = "transparent";
+        }
+      } else if (!isNeighbor && !isHovered) {
+        // Don't dim the hovered node even if not a neighbor
         res.label = "";
-        res.color = DIMMED_NODE_COLOR;
+        const originalColor = (res.color as string) || (data.color as string);
+        res.color = applyAlpha(originalColor, 0.15);
         res.borderColor = "transparent";
       }
     }
@@ -108,7 +135,13 @@ export function createEdgeReducer(state: StateGetters) {
       return res;
     }
 
-    const base = edgeBaseColor(g, data);
+    // Coach edges get the neutral shared-match color when they have no
+    // winrate entry, instead of being hidden like winrate-less player edges.
+    const [ca, cb] = g.extremities(_edge);
+    const isCoachEdge = Boolean(
+      g.getNodeAttribute(ca, "isCoach") || g.getNodeAttribute(cb, "isCoach"),
+    );
+    const base = edgeBaseColor(g, data) ?? (isCoachEdge ? SHARED_MATCH_COLOR : null);
     if (base == null) {
       res.hidden = true;
       return res;
@@ -116,22 +149,73 @@ export function createEdgeReducer(state: StateGetters) {
     const alpha = aMin + (aMax - aMin) * Math.min(1, Math.max(0, (data.recency as number) ?? 0.5));
     res.color = applyAlpha(base, alpha);
 
+    if (!state.showEdges()) {
+      res.hidden = true;
+      return res;
+    }
+
     const pinned = state.pinnedId();
+    const hoverMatchIds = state.hoverMatchNodeIds();
+    const hasMatchHover = hoverMatchIds != null && hoverMatchIds.size > 0;
+    const hoveredOther = state.hoveredOther();
+
     if (pinned != null) {
       const [a, b] = g.extremities(_edge);
+      const pinnedNeighbors = state.pinnedNeighbors();
+      const hasHoveredNeighbor = hoveredOther != null && pinnedNeighbors.has(hoveredOther);
+      const aIsPinned = a === pinned;
+      const bIsPinned = b === pinned;
+      const aIsHoveredNeighbor = a === hoveredOther;
+      const bIsHoveredNeighbor = b === hoveredOther;
+      const aIsPinnedNeighbor = pinnedNeighbors.has(a);
+      const bIsPinnedNeighbor = pinnedNeighbors.has(b);
       const joinsPinned =
-        (a === pinned && state.pinnedNeighbors().has(b)) ||
-        (b === pinned && state.pinnedNeighbors().has(a));
+        (aIsPinned && bIsPinnedNeighbor) ||
+        (bIsPinned && aIsPinnedNeighbor);
+      const joinsHoveredNeighbor =
+        (aIsPinned && bIsHoveredNeighbor) ||
+        (bIsPinned && aIsHoveredNeighbor);
       const hovered = state.hoveredOther();
       const joinsHoveredOther =
         hovered != null &&
         a !== b &&
         ((a === pinned && b === hovered) || (b === pinned && a === hovered));
-      if (_edge === state.pinnedEdge()) {
+
+      if (hasMatchHover) {
+        const aInMatch = hoverMatchIds!.has(a);
+        const bInMatch = hoverMatchIds!.has(b);
+
+        // Show edge if it connects pinned node to a match node that is its neighbor
+        if ((aIsPinned && bInMatch && bIsPinnedNeighbor) ||
+            (bIsPinned && aInMatch && aIsPinnedNeighbor)) {
+          res.color = base;
+          return res;
+        }
+
+        // Hide edges to neighbors not in match
+        if (joinsPinned) {
+          res.hidden = true;
+          return res;
+        }
+      }
+
+      if (_edge === state.pinnedEdge() || joinsHoveredOther) {
         res.color = base;
-      } else if (joinsHoveredOther) {
+      } else if (hasHoveredNeighbor && joinsHoveredNeighbor) {
+        // Show edge between pinned and the specific hovered neighbor
         res.color = base;
-      } else if (!joinsPinned) {
+      } else if (!hasHoveredNeighbor && joinsPinned) {
+        // No neighbor hovered - show all pinned neighbor edges
+        if (hoveredOther != null && !pinnedNeighbors.has(hoveredOther)) {
+          // Hovering an unconnected node - dim pinned's edges
+          res.color = applyAlpha(base, 0.15);
+        } else {
+          res.color = base;
+        }
+      } else if (joinsPinned) {
+        // Other pinned neighbor edges - dim them
+        res.color = applyAlpha(base, 0.15);
+      } else {
         res.hidden = true;
       }
       return res;
