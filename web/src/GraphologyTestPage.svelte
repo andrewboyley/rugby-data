@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onDestroy } from "svelte";
+	import { onDestroy, untrack } from "svelte";
 	import { push } from "svelte-spa-router";
 	import Graph from "graphology";
 	import { circular } from "graphology-layout";
@@ -90,7 +90,7 @@
 		const cx = cam.x, cy = cam.y;
 		const spacing = Math.pow(2, Math.ceil(Math.log2(ratio * 60)));
 		ctx.clearRect(0, 0, c.width, c.height);
-		if (!showGrid) return;
+		if (!untrack(() => showGrid)) return;
 		const halfW = (cssW / 2) * ratio;
 		const halfH = (cssH / 2) * ratio;
 		const graphLeft = cx - halfW;
@@ -214,11 +214,11 @@
 		suppressCameraUpdate = false;
 		s.getCamera().addListener("updated", () => {
 			drawGrid();
-			if (!suppressCameraUpdate && autoFit) autoFit = false;
+			if (!suppressCameraUpdate && untrack(() => autoFit)) autoFit = false;
 		});
 		s.addListener("afterRender", () => { drawGrid(); });
 		containerObserver = new ResizeObserver(() => {
-			if (autoFit && sigmaInstance === s) {
+			if (untrack(() => autoFit && !layoutRunning && sigmaInstance === s)) {
 				requestAnimationFrame(() => {
 					suppressCameraUpdate = true;
 					s.resize();
