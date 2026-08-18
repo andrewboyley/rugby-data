@@ -506,25 +506,19 @@
 				</div>
 			{/if}
 			<!-- Bottom right: layout controls -->
-		<div class="absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2">
-			<div class="flex flex-col gap-1 text-xs font-mono bg-base-200/80 backdrop-blur rounded px-2 py-1.5">
-				<label class="flex items-center gap-1.5 cursor-pointer select-none">
-					<input type="checkbox" bind:checked={autoFit} class="checkbox checkbox-xs" />
-					Auto-fit
-				</label>
-				<label class="flex items-center gap-1.5 cursor-pointer select-none">
-					<input type="checkbox" bind:checked={showGrid} class="checkbox checkbox-xs" />
-					Grid
-				</label>
+			<div class="absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2">
+				<div class="flex flex-col gap-1 text-xs font-mono bg-base-200/80 backdrop-blur rounded px-2 py-1.5">
+					<label class="flex items-center gap-1.5 cursor-pointer select-none">
+						<input type="checkbox" bind:checked={autoFit} class="checkbox checkbox-xs" />
+						Auto-fit
+					</label>
+					<label class="flex items-center gap-1.5 cursor-pointer select-none">
+						<input type="checkbox" bind:checked={showGrid} class="checkbox checkbox-xs" />
+						Grid
+					</label>
+				</div>
 			</div>
-				<button
-					class="btn btn-xs {layoutRunning ? 'btn-error' : 'btn-primary'}"
-					onclick={layoutRunning ? stopLayout : startLayout}
-				>
-					{layoutRunning ? "Stop" : "Start"} Layout
-				</button>
-			</div>
-		</div>
+	</div>
 	</div>
 
 	<!-- Bottom: Live View (full width) -->
@@ -536,12 +530,18 @@
 		>
 			{bottomOpen ? "▼" : "▲"} Live View
 			{#if tickStats.length > 0}
-				<span class="badge badge-xs badge-primary ml-1">{tickStats.length}</span>
+				<span class="badge badge-xs badge-primary ml-1 px-1.5 py-0.5">{tickStats.length}</span>
 			{/if}
 		</button>
 		{#if bottomOpen}
 			<div class="overflow-y-auto px-3 pb-2" style="max-height: 22rem;">
-				<LiveViewPanel stats={tickStats} running={layoutRunning} quality={layoutQuality} />
+					<LiveViewPanel
+					stats={tickStats}
+					running={layoutRunning}
+					quality={layoutQuality}
+					onStartStop={layoutRunning ? stopLayout : startLayout}
+					onReset={() => { stopLayout(); rebuildGraph(); }}
+				/>
 			</div>
 		{/if}
 	</div>

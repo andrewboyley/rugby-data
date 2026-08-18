@@ -3,7 +3,13 @@
 	import "uplot/dist/uPlot.min.css";
 	import type { LayoutTickStats } from "./graph/layout";
 
-	let { stats, running, quality }: { stats: LayoutTickStats[]; running: boolean; quality: number } = $props();
+	let { stats, running, quality, onStartStop, onReset }: {
+		stats: LayoutTickStats[];
+		running: boolean;
+		quality: number;
+		onStartStop: () => void;
+		onReset: () => void;
+	} = $props();
 
 	let chartContainer: HTMLDivElement | null = $state(null);
 	let uplotInstance: InstanceType<typeof uPlot> | null = null;
@@ -97,9 +103,20 @@
 </script>
 
 <div class="flex flex-col gap-3">
+	<!-- Layout controls -->
+	<div class="flex items-center gap-2 mb-2">
+		<button
+			class="btn btn-xs {running ? 'btn-error' : 'btn-primary'}"
+			onclick={onStartStop}
+		>
+			{running ? "Stop" : "Start"} Layout
+		</button>
+		<button class="btn btn-xs btn-ghost" onclick={onReset}>Reset</button>
+	</div>
+
 	{#if !running && stats.length === 0}
 		<div class="flex items-center justify-center h-48 text-base-content/40">
-			<p class="text-sm">Start a layout to see live metrics</p>
+			<p class="text-sm">Start a layout to see live metrics. Adjust parameters in the sidebar above.</p>
 		</div>
 	{:else}
 		<!-- Chart -->
