@@ -4,8 +4,8 @@
 	import Graph from "graphology";
 	import { circular } from "graphology-layout";
 	import forceAtlas2 from "graphology-layout-forceatlas2";
-	import Sigma from "sigma";
-	import { NodeCircleProgram } from "sigma/rendering";
+import Sigma from "sigma";
+import { sdfCircle } from "sigma/rendering";
 	import louvain from "graphology-communities-louvain";
 	import { getCameraStateToFitViewportToNodes } from "@sigma/utils";
 	import LiveViewPanel from "./LiveViewPanel.svelte";
@@ -21,15 +21,11 @@
 	async function goHome() { await push("/"); }
 
 	let nodeCount = $state(200);
-	let edgeProbability = $state(0.01);
 	let clusterCount = $state(10);
 	let clusterStrength = $state(3);
 	let seed = $state(42);
 	let intraClusterOnly = $state(true);
-	let intraWeightMean = $state(2);
-	let intraWeightStd = $state(0.5);
-	let interWeightMean = $state(0.45);
-	let interWeightStd = $state(0.15);
+	let degreeRatio = $state(0.3);
 	let autoFit = $state(true);
 	let showGrid = $state(true);
 	let settingsTab = $state<"graph" | "fa2">("graph");
@@ -54,8 +50,8 @@
 	let iterations = $state(0);
 	let layoutQuality = $state(0);
 
-	let host: HTMLDivElement | null = null;
-	let gridCanvas: HTMLCanvasElement | null = null;
+	let host = $state<HTMLDivElement | null>(null);
+	let gridCanvas = $state<HTMLCanvasElement | null>(null);
 	let sigmaInstance: Sigma | null = null;
 	let containerObserver: ResizeObserver | null = null;
 	let currentGraph: Graph | null = null;
@@ -71,7 +67,7 @@
 		const state = getCameraStateToFitViewportToNodes(sigmaInstance, nodeKeys);
 		suppressCameraUpdate = true;
 		if (animate) {
-			sigmaInstance.getCamera().animate({ ...state }, {}, () => { suppressCameraUpdate = false; });
+			sigmaInstance.getCamera().animate({ ...state }, {}).then(() => { suppressCameraUpdate = false; });
 		} else {
 			sigmaInstance.getCamera().setState({ ...state });
 			suppressCameraUpdate = false;
@@ -163,81 +159,114 @@
 	function startGridLoop() {
 		if (gridRafId) cancelAnimationFrame(gridRafId);
 		const tick = () => {
-			drawGrid();
+			if (sigmaInstance) drawGrid();
 			gridRafId = requestAnimationFrame(tick);
 		};
 		gridRafId = requestAnimationFrame(tick);
 	}
 
-	function rebuildGraph() {
-		const container = host;
-		destroySigma();
-		tickStats = [];
-		previousPositions = new Map();
-
-		const g = new Graph({ multi: false });
-		const rng = mulberry32(seed);
-		const baseSize = Math.max(1, Math.min(20, 120 / Math.sqrt(nodeCount)));
-		const nodeList: { id: string; cluster: number }[] = [];
-		for (let i = 0; i < nodeCount; i++) {
-			const cluster = Math.floor(rng() * clusterCount);
-			nodeList.push({ id: `n${i}`, cluster });
-			g.addNode(`n${i}`, { cluster, label: `Node ${i}`, size: baseSize, color: CLUSTER_COLORS[cluster % CLUSTER_COLORS.length] });
+// Create the Sigma renderer exactly once. Every subsequent parameter change
+// swaps the graph data via setGraph() instead of tearing down and rebuilding
+// the WebGL context — so there is never more than one context and no
+// "allocate" exhaustion error, even when the slider is dragged rapidly.
+function ensureSigma() {
+	if (sigmaInstance || !host) return;
+	const empty = new Graph({ multi: false });
+	const s = new Sigma(empty, host, {
+		primitives: { nodes: { shapes: [sdfCircle()] } },
+		styles: {
+			nodes: [{ color: { attribute: "color" }, size: { attribute: "size" } }],
+			edges: [{ color: "#888" }],
+		},
+		settings: { allowInvalidContainer: true, itemSizesReference: "screen" },
+	});
+	sigmaInstance = s;
+	(window as any).__sigma = s;
+	s.getCamera().addListener("updated", () => {
+		drawGrid();
+		if (!suppressCameraUpdate && untrack(() => autoFit)) autoFit = false;
+	});
+	s.addListener("afterRender", () => { drawGrid(); });
+	containerObserver = new ResizeObserver(() => {
+		if (untrack(() => autoFit && !layoutRunning && sigmaInstance === s)) {
+			requestAnimationFrame(() => {
+				suppressCameraUpdate = true;
+				s.resize();
+				s.refresh();
+				fitCamera(false);
+				suppressCameraUpdate = false;
+			});
 		}
-		for (let i = 0; i < nodeCount; i++) {
-			for (let j = i + 1; j < nodeCount; j++) {
-				const sameCluster = nodeList[i].cluster === nodeList[j].cluster;
-				if (intraClusterOnly && !sameCluster) continue;
-				const prob = sameCluster ? edgeProbability * clusterStrength : edgeProbability;
-			if (rng() < prob) {
-					const mean = sameCluster ? intraWeightMean : interWeightMean;
-					const std = sameCluster ? intraWeightStd : interWeightStd;
-					const w = Math.max(0.01, normalSample(rng, mean, std));
-					g.addEdge(nodeList[i].id, nodeList[j].id, { weight: w });
-				}
-			}
-		}
-		circular.assign(g, { scale: 100 });
-		currentGraph = g;
+	});
+	containerObserver.observe(host);
+	startGridLoop();
+}
 
-		if (!container) return;
-		const s = new Sigma(g, container, {
-			labelColor: { color: "#ddd" },
-			defaultEdgeColor: "#ccc",
-			allowInvalidContainer: true,
-			nodeProgramClasses: { circle: NodeCircleProgram },
-		});
-		sigmaInstance = s;
-		suppressCameraUpdate = true;
-		s.resize();
-		fitCamera(false);
-		suppressCameraUpdate = false;
-		s.getCamera().addListener("updated", () => {
-			drawGrid();
-			if (!suppressCameraUpdate && untrack(() => autoFit)) autoFit = false;
-		});
-		s.addListener("afterRender", () => { drawGrid(); });
-		containerObserver = new ResizeObserver(() => {
-			if (untrack(() => autoFit && !layoutRunning && sigmaInstance === s)) {
-				requestAnimationFrame(() => {
-					suppressCameraUpdate = true;
-					s.resize();
-					s.refresh();
-					fitCamera(false);
-					suppressCameraUpdate = false;
-				});
-			}
-		});
-		containerObserver.observe(container);
-		requestAnimationFrame(() => {
-			s.refresh();
-		});
-		startGridLoop();
+function rebuildGraph() {
+	if (!host) return;
+	ensureSigma();
+	if (!sigmaInstance) return;
+
+	const g = new Graph({ multi: false });
+	const rng = mulberry32(seed);
+	const baseSize = Math.max(1, Math.min(20, 120 / Math.sqrt(nodeCount)));
+	const nodeList: { id: string; cluster: number }[] = [];
+	const clusterSizes = new Array(clusterCount).fill(0);
+	for (let i = 0; i < nodeCount; i++) {
+		const cluster = Math.floor(rng() * clusterCount);
+		clusterSizes[cluster]++;
+		nodeList.push({ id: `n${i}`, cluster });
+		g.addNode(`n${i}`, { cluster, size: baseSize, color: CLUSTER_COLORS[cluster % CLUSTER_COLORS.length] });
+	}
+	const targetDegree = new Array(nodeCount);
+	for (let i = 0; i < nodeList.length; i++) {
+		const c = nodeList[i].cluster;
+		const poolSize = intraClusterOnly ? clusterSizes[c] - 1 : nodeCount - 1;
+		targetDegree[i] = Math.round(poolSize * degreeRatio);
 	}
 
+	const existingEdges: [number, number][] = [];
+	const degree = new Array(nodeCount).fill(0);
+
+	for (let i = 0; i < nodeCount; i++) {
+		const candidates: number[] = [];
+		for (let j = 0; j < nodeCount; j++) {
+			if (i === j) continue;
+			const sameCluster = nodeList[i].cluster === nodeList[j].cluster;
+			if (intraClusterOnly && !sameCluster) continue;
+			candidates.push(j);
+		}
+		for (let c = candidates.length - 1; c > 0; c--) {
+			const r = Math.floor(rng() * (c + 1));
+			[candidates[c], candidates[r]] = [candidates[r], candidates[c]];
+		}
+		const need = Math.max(0, targetDegree[i] - degree[i]);
+		for (let k = 0; k < need && k < candidates.length; k++) {
+			const j = candidates[k];
+			if (degree[j] >= targetDegree[j]) continue;
+			const existing = existingEdges.some(([a, b]) => (a === i && b === j) || (a === j && b === i));
+			if (existing) continue;
+			const w = 0.1 + normalSample(rng, 1, 0.5);
+			g.addEdge(nodeList[i].id, nodeList[j].id, { weight: w });
+			existingEdges.push([i, j]);
+			degree[i]++;
+			degree[j]++;
+		}
+	}
+	circular.assign(g, { scale: 100 });
+	currentGraph = g;
+
+	sigmaInstance.setGraph(g);
+	suppressCameraUpdate = true;
+	sigmaInstance.resize();
+	if (untrack(() => autoFit)) fitCamera(false);
+	suppressCameraUpdate = false;
+	sigmaInstance.refresh({ skipIndexation: true });
+}
+
 	$effect(() => {
-		const _n = nodeCount, _e = edgeProbability, _c = clusterCount, _s = clusterStrength, _sd = seed, _ic = intraClusterOnly, _iwm = intraWeightMean, _iws = intraWeightStd, _ewm = interWeightMean, _ews = interWeightStd;
-		void _n; void _e; void _c; void _s; void _sd; void _ic; void _iwm; void _iws; void _ewm; void _ews;
+		const _n = nodeCount, _c = clusterCount, _s = clusterStrength, _sd = seed, _ic = intraClusterOnly, _dr = degreeRatio, _h = host;
+		void _n; void _c; void _s; void _sd; void _ic; void _dr; void _h;
 		rebuildGraph();
 	});
 
@@ -354,61 +383,41 @@
 								<div class="flex flex-col gap-1.5">
 									<label class="flex items-center gap-2 text-xs font-mono">
 										<span class="w-16">Nodes</span>
-										<input type="range" min="1" max="2000" step="1" bind:value={nodeCount} class="range range-xs flex-1" />
+										<input type="range" min="1" max="2000" step="1" bind:value={nodeCount} disabled={layoutRunning} class="range range-xs flex-1" />
 										<span class="w-10 text-right">{nodeCount}</span>
 									</label>
 									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">Edge Prob</span>
-										<input type="range" min="0.001" max="0.1" step="0.001" bind:value={edgeProbability} class="range range-xs flex-1" />
-										<span class="w-10 text-right">{edgeProbability.toFixed(3)}</span>
-									</label>
-									<label class="flex items-center gap-2 text-xs font-mono">
 										<span class="w-16">Clusters</span>
-										<input type="range" min="1" max="20" step="1" bind:value={clusterCount} class="range range-xs flex-1" />
+										<input type="range" min="1" max="20" step="1" bind:value={clusterCount} disabled={layoutRunning} class="range range-xs flex-1" />
 										<span class="w-10 text-right">{clusterCount}</span>
 									</label>
+
 									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">Strength</span>
-										<input type="range" min="1" max="20" step="1" bind:value={clusterStrength} class="range range-xs flex-1" />
-										<span class="w-10 text-right">{clusterStrength}x</span>
+										<span class="w-16">Degree %</span>
+										<input type="range" min="0" max="1" step="0.01" bind:value={degreeRatio} disabled={layoutRunning} class="range range-xs flex-1" />
+										<span class="w-10 text-right">{(degreeRatio * 100).toFixed(0)}%</span>
 									</label>
-									<div class="flex flex-col gap-0.5">
-										<span class="w-16 text-xs font-mono text-base-content/60">Intra Wt</span>
-										<label class="flex items-center gap-2 text-xs font-mono">
-											<span class="w-16">μ</span>
-											<input type="range" min="0" max="10" step="0.1" bind:value={intraWeightMean} class="range range-xs flex-1" />
-											<span class="w-10 text-right">{intraWeightMean.toFixed(1)}</span>
-										</label>
-										<label class="flex items-center gap-2 text-xs font-mono">
-											<span class="w-16">σ</span>
-											<input type="range" min="0.01" max="5" step="0.01" bind:value={intraWeightStd} class="range range-xs flex-1" />
-											<span class="w-10 text-right">{intraWeightStd.toFixed(2)}</span>
-										</label>
-									</div>
-									<div class="flex flex-col gap-0.5">
-										<span class="w-16 text-xs font-mono text-base-content/60">Inter Wt</span>
-										<label class="flex items-center gap-2 text-xs font-mono">
-											<span class="w-16">μ</span>
-											<input type="range" min="0" max="10" step="0.1" bind:value={interWeightMean} class="range range-xs flex-1" />
-											<span class="w-10 text-right">{interWeightMean.toFixed(1)}</span>
-										</label>
-										<label class="flex items-center gap-2 text-xs font-mono">
-											<span class="w-16">σ</span>
-											<input type="range" min="0.01" max="5" step="0.01" bind:value={interWeightStd} class="range range-xs flex-1" />
-											<span class="w-10 text-right">{interWeightStd.toFixed(2)}</span>
-										</label>
-									</div>
 									<label class="flex items-center gap-2 text-xs font-mono">
 										<span class="w-16">Seed</span>
-										<input type="number" bind:value={seed} class="input input-bordered input-xs font-mono w-20" />
+										<input type="number" bind:value={seed} disabled={layoutRunning} class="input input-bordered input-xs font-mono w-20" />
 									</label>
+								</div>
+								<div class="flex gap-2 mt-2">
+									<button class="btn btn-xs btn-ghost btn-block" disabled={layoutRunning} onclick={() => {
+										nodeCount = 200;
+										clusterCount = 10;
+										clusterStrength = 3;
+										degreeRatio = 0.3;
+										seed = 42;
+										intraClusterOnly = true;
+									}}>Reset</button>
 								</div>
 							</fieldset>
 							<fieldset class="fieldset border border-base-300 rounded-box p-2">
 								<legend class="fieldset-legend text-xs">Options</legend>
 								<div class="flex flex-col gap-1">
 									<label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer">
-										<input type="checkbox" bind:checked={intraClusterOnly} class="checkbox checkbox-xs" />
+										<input type="checkbox" bind:checked={intraClusterOnly} disabled={layoutRunning} class="checkbox checkbox-xs" />
 										Intra-cluster only
 									</label>
 								</div>
@@ -470,11 +479,25 @@
 										<input type="checkbox" bind:checked={fa2Settings.adjustSizes} class="checkbox checkbox-xs" />
 										Adjust Sizes
 									</label>
+</div>
+								<div class="flex gap-2 mt-2">
+									<button class="btn btn-xs btn-ghost btn-block" onclick={() => {
+										fa2Settings.gravity = 1;
+										fa2Settings.slowDown = 1;
+										fa2Settings.scalingRatio = 10;
+										fa2Settings.barnesHutTheta = 0.5;
+										fa2Settings.edgeWeightInfluence = 1;
+										fa2Settings.strongGravityMode = false;
+										fa2Settings.barnesHutOptimize = true;
+										fa2Settings.outboundAttractionDistribution = false;
+										fa2Settings.linLogMode = false;
+										fa2Settings.adjustSizes = false;
+									}}>Reset</button>
 								</div>
 							</fieldset>
-				</div>
+						</div>
 
-				{/if}
+					{/if}
 			</div>
 
 			<!-- Collapse button -->
@@ -542,7 +565,7 @@
 					running={layoutRunning}
 					quality={layoutQuality}
 					onStartStop={layoutRunning ? stopLayout : startLayout}
-					onReset={() => { stopLayout(); rebuildGraph(); }}
+					onReset={() => { stopLayout(); tickStats = []; layoutQuality = 0; iterations = 0; rebuildGraph(); }}
 				/>
 			</div>
 		{/if}

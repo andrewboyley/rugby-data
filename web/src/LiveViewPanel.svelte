@@ -39,17 +39,17 @@
 				x: { time: false },
 				y: { log: 10, min: 1e-6 },
 			},
-			series: [
-				{},
-				// @ts-ignore
-				{ label: "Kinetic Energy", stroke: "#e03131", width: 1.5, paths: uPlot.paths.linear() },
-				// @ts-ignore
-				{ label: "Mean Displacement", stroke: "#1971c2", width: 1, paths: uPlot.paths.linear() },
-				// @ts-ignore
-				{ label: "Max Displacement", stroke: "#fa923f", width: 1, paths: uPlot.paths.linear() },
-				// @ts-ignore
-				{ label: "Std Displacement", stroke: "#40c057", width: 1, paths: uPlot.paths.linear() },
-			],
+		series: [
+			{},
+			// @ts-ignore
+			{ label: "Kinetic Energy", stroke: "#e03131", width: 1.5, paths: uPlot.paths.linear(), value: legendValue(3) },
+			// @ts-ignore
+			{ label: "Mean Displacement", stroke: "#1971c2", width: 1, paths: uPlot.paths.linear(), value: legendValue(3) },
+			// @ts-ignore
+			{ label: "Max Displacement", stroke: "#fa923f", width: 1, paths: uPlot.paths.linear(), value: legendValue(3) },
+			// @ts-ignore
+			{ label: "Std Displacement", stroke: "#40c057", width: 1, paths: uPlot.paths.linear(), value: legendValue(3) },
+		],
 			axes: [
 				{ scale: "x", show: false },
 				{ scale: "y", show: true, stroke: "rgba(128,128,128,0.3)", grid: { stroke: "rgba(128,128,128,0.1)" }, size: 50 },
@@ -97,8 +97,17 @@
 		};
 	});
 
-	function formatNum(n: number): string {
-		return n >= 1e4 || (n < 1e-3 && n > 0) ? n.toExponential(2) : n.toFixed(4);
+	function formatNum(n: number, width = 9, dec = 3): string {
+		if (!isFinite(n)) return "NaN".padStart(width);
+		let s = n.toFixed(dec);
+		if (s.length > width) s = n.toExponential(2);
+		if (s.length > width) s = s.slice(0, width);
+		return s.padStart(width);
+	}
+
+	function legendValue(dec: number) {
+		return (_u: uPlot, rawValue: number, _seriesIdx: number, _idx: number | null) =>
+			formatNum(rawValue ?? 0, 9, dec);
 	}
 </script>
 
@@ -147,33 +156,43 @@
 			<div class="grid grid-cols-3 gap-2">
 				<div class="stat bg-base-100 border border-base-300 rounded p-2">
 					<div class="stat-title text-[10px]">Quality (Q)</div>
-					<div class="stat-value text-sm font-mono">{quality.toFixed(4)}</div>
+					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(quality, 9, 4)}</div>
 				</div>
 				<div class="stat bg-base-100 border border-base-300 rounded p-2">
 					<div class="stat-title text-[10px]">Kinetic Energy</div>
-					<div class="stat-value text-sm font-mono">{formatNum(latest.kineticEnergy)}</div>
+					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.kineticEnergy, 9, 3)}</div>
 				</div>
 				<div class="stat bg-base-100 border border-base-300 rounded p-2">
 					<div class="stat-title text-[10px]">Mean Disp.</div>
-					<div class="stat-value text-sm font-mono">{formatNum(latest.meanDisplacement)}</div>
+					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.meanDisplacement, 9, 3)}</div>
 				</div>
 				<div class="stat bg-base-100 border border-base-300 rounded p-2">
 					<div class="stat-title text-[10px]">Max Disp.</div>
-					<div class="stat-value text-sm font-mono">{formatNum(latest.maxDisplacement)}</div>
+					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.maxDisplacement, 9, 3)}</div>
 				</div>
 				<div class="stat bg-base-100 border border-base-300 rounded p-2">
 					<div class="stat-title text-[10px]">Std Disp.</div>
-					<div class="stat-value text-sm font-mono">{formatNum(latest.stdDisplacement)}</div>
+					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.stdDisplacement, 9, 3)}</div>
 				</div>
 				<div class="stat bg-base-100 border border-base-300 rounded p-2">
 					<div class="stat-title text-[10px]">Settled</div>
-					<div class="stat-value text-sm font-mono">{(latest.settledProgress * 100).toFixed(0)}%</div>
+					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.settledProgress * 100, 4, 0)}%</div>
 				</div>
 				<div class="stat bg-base-100 border border-base-300 rounded p-2">
 					<div class="stat-title text-[10px]">Nodes</div>
-					<div class="stat-value text-sm font-mono">{latest.nodeCount}</div>
+					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.nodeCount, 4, 0)}</div>
 				</div>
 			</div>
 		{/if}
 	{/if}
 </div>
+
+<style>
+	:global(.u-legend .u-value) {
+		font-family: ui-monospace, "SFMono-Regular", "Menlo", monospace;
+		white-space: pre;
+		text-align: right;
+		min-width: 9ch;
+		display: inline-block;
+	}
+</style>
