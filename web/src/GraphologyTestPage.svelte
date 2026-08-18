@@ -513,7 +513,7 @@
 						Auto-fit
 					</label>
 					<label class="flex items-center gap-1.5 cursor-pointer select-none">
-						<input type="checkbox" bind:checked={showGrid} class="checkbox checkbox-xs" />
+						<input type="checkbox" checked={showGrid} onchange={(e: Event) => { showGrid = (e.target as HTMLInputElement).checked; }} class="checkbox checkbox-xs" />
 						Grid
 					</label>
 				</div>
