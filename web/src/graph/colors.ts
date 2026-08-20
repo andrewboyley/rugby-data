@@ -11,6 +11,15 @@ export const DIMMED_NODE_COLOR = "#39434f";
 export const ACTIVE_BORDER_COLOR = "#ffffff";
 export const LABEL_COLOR = "#d6dbe2";
 
+// Distinct hues used to colour synthetic clusters in the test-page generator
+// (graph-generator.ts). Cycled past the palette length with a deterministic
+// HSL fallback when clusterCount exceeds the palette size.
+export const CLUSTER_COLORS: string[] = [
+  "#e03131", "#1971c2", "#40c057", "#fa923f",
+  "#862e9c", "#e8590c", "#109868", "#0b7285",
+  "#c2255c", "#5c940d", "#9c36b5", "#e67700",
+];
+
 const JERSEY_COLORS: string[] = [
   "#23171b", "#453390", "#4a52d4", "#4172f3", "#3491f8",
   "#29afeb", "#25cad4", "#2bdfb7", "#3af099", "#53fa7d",
@@ -77,6 +86,15 @@ export function needsBorder(color: string | undefined | null): string {
   if (l >= MIN_BORDER_LIGHTNESS) return color;
   const [nr, ng, nb] = hslToRgb(h, Math.max(s, MIN_BORDER_SATURATION), MIN_BORDER_LIGHTNESS);
   return rgbToHex(nr, ng, nb);
+}
+
+export function mixHexColors(colorA: string, colorB: string, t = 0.5): string {
+  const [r1, g1, b1] = hexToRgb(colorA);
+  const [r2, g2, b2] = hexToRgb(colorB);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `rgb(${r},${g},${b})`;
 }
 
 function hexToRgb(hex: string): [number, number, number] {

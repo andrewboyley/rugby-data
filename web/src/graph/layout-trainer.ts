@@ -164,7 +164,7 @@ this.episodeRewards = [];
     const params = this.optimizer.chooseArm(context, this.currentSettings ?? { gravity: 1, slowDown: 1, scalingRatio: 10, strongGravityMode: false, barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1, outboundAttractionDistribution: false, linLogMode: false, adjustSizes: false } as FA2Params);
     this.setCurrentEpisodeParams(params);
     this.trainIterCount = this.getIterBudget();
-    this.controller.resetToCircle(100);
+    this.controller.resetToCircle();
     this.callbacks.onEpisodeStart(params);
     this.liveEpStartCount++;
   }

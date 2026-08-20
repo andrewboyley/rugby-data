@@ -154,3 +154,9 @@ root (safe to commit). It:
 When editing this repo, prefer the `just` commands above and the code-intel
 tools (codegraph for structure, chrome-devtools for the running viewer), and
 run `just check-python` / `just check-web` after changes.
+
+<!-- openwolf:begin -->
+# OpenWolf
+
+This project uses OpenWolf for context management. Read and follow .wolf/OPENWOLF.md at session start. Check .wolf/cerebrum.md before generating code. Grep .wolf/anatomy.md for a file's path before reading it (never read the whole index).
+<!-- openwolf:end -->

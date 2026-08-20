@@ -20,12 +20,6 @@
     { key: "scalingRatio", label: "Scaling", min: 1, max: 100, step: 1, type: "slider" as const, title: "Scaling factor for force magnitude; higher = more spread" },
     { key: "barnesHutTheta", label: "BH Theta", min: 0.1, max: 1, step: 0.05, type: "slider" as const, title: "Barnes-Hut approximation threshold; lower = more accurate, slower" },
     { key: "edgeWeightInfluence", label: "Edge Wt", min: 0, max: 5, step: 0.1, type: "slider" as const, title: "Influence of edge weight on attraction force" },
-    // Boolean params (checkboxes)
-    { key: "strongGravityMode", label: "Strong Gravity", type: "checkbox" as const, title: "Force all nodes toward center regardless of edges" },
-    { key: "barnesHutOptimize", label: "BH Optimize", type: "checkbox" as const, title: "Use Barnes-Hut quadtree approximation for repulsion" },
-    { key: "outboundAttractionDistribution", label: "Outbound", type: "checkbox" as const, title: "Distribute attraction force to outbound edges" },
-    { key: "linLogMode", label: "LinLog", type: "checkbox" as const, title: "Logarithmic attraction for high-degree nodes" },
-    { key: "adjustSizes", label: "Adjust Sizes", type: "checkbox" as const, title: "Adjust node sizes based on degree" },
   ] as const;
 
   function fmt(v: number): string {
@@ -41,8 +35,7 @@
   <div class="flex flex-col gap-1.5">
     {#each paramDefs as def}
       <ParamRow
-        key={def.key}
-        {def}
+        {...def}
         params={params}
         locked={locked}
         autoTune={autoTune}

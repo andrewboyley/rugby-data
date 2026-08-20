@@ -6,6 +6,7 @@ import FA2Layout from "graphology-layout-forceatlas2/worker";
 import { circular } from "graphology-layout";
 import type Graph from "graphology";
 import { normalizePositions } from "./camera";
+import { UNIT_CIRCLE_OPTIONS } from "./graph-generator";
 
 const POSITION_SAVE_INTERVAL_MS = 60_000;
 const STATS_POLL_MS = 50;
@@ -26,7 +27,7 @@ const LAYOUT_SETTINGS = {
 type LayoutPositions = Record<string, { x: number; y: number }>;
 
 export function circularSeed(graph: Graph): LayoutPositions {
-	const raw = circular(graph, { scale: 100 });
+	const raw = circular(graph, UNIT_CIRCLE_OPTIONS);
 	const out: LayoutPositions = {};
 	for (const key in raw) {
 		const val = (raw as Record<string, { x: number; y: number }>)[key];

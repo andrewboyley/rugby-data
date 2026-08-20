@@ -1,11 +1,13 @@
 import Graph from "graphology";
 import { circular } from "graphology-layout";
+import { CLUSTER_COLORS, mixHexColors } from "./colors";
 
 export interface GraphSpec {
   nodeCount: number;
   clusterCount: number;
   degreeRatio: number;
   seed: number;
+  onlyWithinCluster?: boolean;
 }
 
 export interface GraphGenResult {
@@ -15,6 +17,14 @@ export interface GraphGenResult {
 }
 
 const MAX_EDGES = 15000;
+
+// Graphology circular layout options producing a circle of radius 100 centered
+// on the origin (0, 0): center 0.5 yields offset (0.5 - 0.5) * scale = 0.
+export const UNIT_CIRCLE_OPTIONS = { scale: 100, center: 0.5 } as const;
+
+export function assignUnitCircle(graph: Graph): void {
+  circular.assign(graph, UNIT_CIRCLE_OPTIONS);
+}
 
 function mulberry32(a: number) {
   return function () {
@@ -33,8 +43,8 @@ function estimateEdges(spec: GraphSpec): number {
 function clampNodeCount(spec: GraphSpec): GraphSpec {
   let { nodeCount, clusterCount, degreeRatio, seed } = spec;
   let est = estimateEdges({ nodeCount, clusterCount, degreeRatio, seed });
-  while (est > MAX_EDGES && nodeCount > 10) {
-    nodeCount = Math.max(10, nodeCount - 10);
+  while (est > MAX_EDGES && nodeCount > 1) {
+    nodeCount = Math.max(1, nodeCount - 10);
     est = estimateEdges({ nodeCount, clusterCount, degreeRatio, seed });
   }
   return { nodeCount, clusterCount, degreeRatio, seed };
@@ -43,54 +53,69 @@ function clampNodeCount(spec: GraphSpec): GraphSpec {
 export function generateGraph(spec: GraphSpec): GraphGenResult {
   const clamped = clampNodeCount(spec);
   const { nodeCount, clusterCount, degreeRatio, seed } = clamped;
+  const onlyWithinCluster = spec.onlyWithinCluster ?? false;
   const rand = mulberry32(seed);
 
   const graph = new Graph({ multi: false });
   const clusterSize = Math.max(1, Math.floor(nodeCount / clusterCount));
-  const clusters: number[][] = [];
 
-  for (let c = 0; c < clusterCount; c++) {
-    const start = c * clusterSize;
-    const end = Math.min(start + clusterSize, nodeCount);
-    clusters.push(Array.from({ length: end - start }, (_, i) => start + i));
+  function clusterOf(nodeId: number): number {
+    return Math.min(Math.floor(nodeId / clusterSize), clusterCount - 1);
+  }
+
+  function clusterColor(nodeId: number): string {
+    const c = clusterOf(nodeId);
+    if (c < CLUSTER_COLORS.length) return CLUSTER_COLORS[c];
+    return `hsl(${(c / clusterCount) * 360}, 65%, 50%)`;
+  }
+
+  function edgeColor(src: number, tgt: number): string {
+    const cs = clusterOf(src);
+    const ct = clusterOf(tgt);
+    if (cs === ct) return clusterColor(src);
+    return mixHexColors(CLUSTER_COLORS[cs % CLUSTER_COLORS.length], CLUSTER_COLORS[ct % CLUSTER_COLORS.length]);
   }
 
   for (let i = 0; i < nodeCount; i++) {
     graph.addNode(i, {
-      x: (rand() - 0.5) * 200,
-      y: (rand() - 0.5) * 200,
+      x: rand(),
+      y: rand(),
       size: 1 + rand() * 3,
-      color: `hsl(${(i / nodeCount) * 360}, 70%, 50%)`,
+      color: clusterColor(i),
     });
   }
 
   const targetEdges = Math.round((nodeCount * nodeCount * degreeRatio) / 2);
   let edgesAdded = 0;
 
-  for (const cluster of clusters) {
-    for (let i = 0; i < cluster.length; i++) {
-      for (let j = i + 1; j < cluster.length; j++) {
+  for (let c = 0; c < clusterCount; c++) {
+    const start = c * clusterSize;
+    const end = Math.min(start + clusterSize, nodeCount);
+    for (let i = start; i < end; i++) {
+      for (let j = i + 1; j < end; j++) {
         if (edgesAdded >= targetEdges) break;
         if (rand() < degreeRatio * 2) {
-          graph.addEdge(cluster[i], cluster[j]);
+          graph.addEdge(i, j, { color: clusterColor(i) });
           edgesAdded++;
         }
       }
     }
   }
 
-  for (let i = 0; i < nodeCount; i++) {
-    for (let j = i + 1; j < nodeCount; j++) {
-      if (edgesAdded >= targetEdges) break;
-      if (graph.hasEdge(i, j)) continue;
-      if (rand() < degreeRatio * 0.1) {
-        graph.addEdge(i, j);
-        edgesAdded++;
+  if (!onlyWithinCluster) {
+    for (let i = 0; i < nodeCount; i++) {
+      for (let j = i + 1; j < nodeCount; j++) {
+        if (edgesAdded >= targetEdges) break;
+        if (graph.hasEdge(i, j)) continue;
+        if (rand() < degreeRatio * 0.1) {
+          graph.addEdge(i, j, { color: edgeColor(i, j) });
+          edgesAdded++;
+        }
       }
     }
   }
 
-  circular.assign(graph, { scale: 100 });
+  assignUnitCircle(graph);
   return {
     graph,
     estimatedEdges: estimateEdges(clamped),

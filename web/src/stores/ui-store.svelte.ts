@@ -10,8 +10,8 @@ export interface UIState {
   nodeCount: number;
   clusterCount: number;
   degreeRatio: number;
-  useFixedSeed: boolean;
   fixedSeed: number;
+  onlyWithinCluster: boolean;
 
   // Graph ref
   currentGraph: Graph | null;
@@ -34,11 +34,11 @@ const initialState: UIState = {
   settingsTab: "fa2",
   bottomTab: "live",
   bottomOpen: true,
-  nodeCount: 200,
-  clusterCount: 10,
-  degreeRatio: 0.15,
-  useFixedSeed: true,
+  nodeCount: 46,
+  clusterCount: 2,
+  degreeRatio: 0.3,
   fixedSeed: 42,
+  onlyWithinCluster: true,
   currentGraph: null,
   graphReady: false,
   autoFit: true,
@@ -60,8 +60,8 @@ export function resetUIState() {
   uiState.nodeCount = 200;
   uiState.clusterCount = 10;
   uiState.degreeRatio = 0.15;
-  uiState.useFixedSeed = true;
   uiState.fixedSeed = 42;
+  uiState.onlyWithinCluster = false;
   uiState.currentGraph = null;
   uiState.graphReady = false;
   uiState.autoFit = true;
@@ -102,12 +102,12 @@ export function setDegreeRatio(value: number) {
   uiState.degreeRatio = value;
 }
 
-export function setUseFixedSeed(value: boolean) {
-  uiState.useFixedSeed = value;
-}
-
 export function setFixedSeed(value: number) {
   uiState.fixedSeed = value;
+}
+
+export function setOnlyWithinCluster(value: boolean) {
+  uiState.onlyWithinCluster = value;
 }
 
 export function setAutoFit(value: boolean) {

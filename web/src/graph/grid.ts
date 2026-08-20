@@ -61,18 +61,6 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
     const stroke = gridStrokeColor(host);
     const label = gridStrokeColor(host, 0.6);
 
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    graph.forEachNode((_id, a) => {
-      if (a.x < minX) minX = a.x;
-      if (a.x > maxX) maxX = a.x;
-      if (a.y < minY) minY = a.y;
-      if (a.y > maxY) maxY = a.y;
-    });
-    const spanX = Math.max(maxX - minX, 1e-6);
-    const spanY = Math.max(maxY - minY, 1e-6);
-    const stepX = niceStep(spanX / 14);
-    const stepY = niceStep(spanY / 14);
-
     // Visible world bounds so the grid fills the viewport even when panned
     // away from the graph.
     const tl = sigma.viewportToGraph({ x: 0, y: 0 });
@@ -81,6 +69,11 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
     const visMaxX = Math.max(tl.x, br.x);
     const visMinY = Math.min(tl.y, br.y);
     const visMaxY = Math.max(tl.y, br.y);
+
+    // Grid step adapts to zoom: keep ~14 cells across the visible viewport, so
+    // zooming out yields fewer, larger cells (and zooming in finer ones).
+    const stepX = niceStep((visMaxX - visMinX) / 14);
+    const stepY = niceStep((visMaxY - visMinY) / 14);
 
     const toX = (wx: number) => sigma.graphToViewport({ x: wx, y: 0 }).x;
     const toY = (wy: number) => sigma.graphToViewport({ x: 0, y: wy }).y;
@@ -112,6 +105,7 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
 
     const bounds = opts.getBounds?.();
     if (bounds) {
+      // Bounds box is centered on the origin (0, 0).
       const p1 = sigma.graphToViewport({ x: -bounds.maxX, y: -bounds.maxY });
       const p2 = sigma.graphToViewport({ x: bounds.maxX, y: bounds.maxY });
       ctx.setLineDash([5, 5]);

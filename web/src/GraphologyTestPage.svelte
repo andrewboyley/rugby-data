@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, untrack } from "svelte";
   import Graph from "graphology";
-  import { circular } from "graphology-layout";
   import forceAtlas2 from "graphology-layout-forceatlas2";
   import Sigma from "sigma";
   import { sdfCircle } from "sigma/rendering";
@@ -15,17 +14,11 @@
 import { LayoutController } from "./graph";
 import { LayoutTrainer } from "./graph";
 import { FA2OptimizerAdapter } from "./graph";
-import { generateGraph, estimateEdges, clampNodeCount, MAX_EDGES, savePositions } from "./graph";
+import { generateGraph, estimateEdges, clampNodeCount, MAX_EDGES, savePositions, assignUnitCircle } from "./graph";
 import { layoutState, startLayout as startLayoutStore, stopLayout as stopLayoutStore, resetLayoutState, recordTick, setHeuristicFeatures, setPreviousPositions } from "./stores/layout-store.svelte";
 import { optimizerState, setAutoTune, setEpisodeLength, setWeights, setSigns, toggleIgnoreWeight, toggleLock, setLockedParams, updateTrainerStats, addEpisodeMean } from "./stores/optimizer-store.svelte";
-import { uiState, setGraph, setSettingsTab, setBottomTab, toggleBottomOpen, setNodeCount, setClusterCount, setDegreeRatio, setUseFixedSeed, setFixedSeed, setAutoFit, setShowGrid, setShowTrails, setTrailOpacity, setEnforceBounds, setBoundsMaxX, setBoundsMaxY } from "./stores/ui-store.svelte";
+import { uiState, setGraph, setSettingsTab, setBottomTab, toggleBottomOpen, setNodeCount, setClusterCount, setDegreeRatio, setFixedSeed, setOnlyWithinCluster, setAutoFit, setShowGrid, setShowTrails, setTrailOpacity, setEnforceBounds, setBoundsMaxX, setBoundsMaxY } from "./stores/ui-store.svelte";
 import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
-
-  const CLUSTER_COLORS = [
-    "#e03131", "#1971c2", "#40c057", "#fa923f",
-    "#862e9c", "#e8590c", "#109868", "#0b7285",
-    "#c2255c", "#5c940d", "#9c36b5", "#e67700",
-  ];
 
   const CONTEXT_DIM = 4;
   const FRAME_BUDGET_MS = 8;
@@ -87,8 +80,9 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
       degreeRatio: uiState.degreeRatio,
       seed: uiState.fixedSeed,
     });
-    if (clamped.nodeCount !== uiState.nodeCount) {
-      setNodeCount(clamped.nodeCount);
+    const bounded = Math.max(1, Math.min(100, clamped.nodeCount));
+    if (bounded !== uiState.nodeCount) {
+      setNodeCount(bounded);
     }
   });
 
@@ -124,8 +118,8 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
         nodeCount: uiState.nodeCount,
         clusterCount: uiState.clusterCount,
         degreeRatio: uiState.degreeRatio,
-        useFixedSeed: true,
         fixedSeed: uiState.fixedSeed,
+        onlyWithinCluster: uiState.onlyWithinCluster,
         autoFit: uiState.autoFit,
         showGrid: uiState.showGrid,
         showTrails: uiState.showTrails,
@@ -162,6 +156,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
         if (data.clusterCount) setClusterCount(data.clusterCount);
         if (data.degreeRatio) setDegreeRatio(data.degreeRatio);
         if (data.fixedSeed) setFixedSeed(data.fixedSeed);
+        if (data.onlyWithinCluster !== undefined) setOnlyWithinCluster(data.onlyWithinCluster);
         
         if (data.autoFit !== undefined) setAutoFit(data.autoFit);
         if (data.showGrid !== undefined) setShowGrid(data.showGrid);
@@ -177,16 +172,28 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
   // Clear cache on fresh load (for development)
   localStorage.removeItem(uiState.storageKey);
 
-  // Initialize sigma and build the initial graph
-  ensureSigma();
-  rebuildGraph();
+  // Initialize sigma and build the graph automatically once the container is
+  // bound, and regenerate whenever the graph-generation settings change.
+  $effect(() => {
+    uiState.nodeCount;
+    uiState.clusterCount;
+    uiState.degreeRatio;
+    uiState.fixedSeed;
+    uiState.onlyWithinCluster;
+    if (!host) return;
+    untrack(() => {
+      ensureSigma();
+      rebuildGraph();
+    });
+  });
 
   function rebuildGraph() {
     const { graph, maxEdgesExceeded } = generateGraph({
       nodeCount: uiState.nodeCount,
       clusterCount: uiState.clusterCount,
       degreeRatio: uiState.degreeRatio,
-      seed: uiState.useFixedSeed ? uiState.fixedSeed : Math.floor(Math.random() * 1e9),
+      seed: uiState.fixedSeed,
+      onlyWithinCluster: uiState.onlyWithinCluster,
     });
 
     setGraph(graph);
@@ -256,7 +263,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     });
 
     // Reset to circle and update sigma
-    circular.assign(graph, { scale: 100 });
+    assignUnitCircle(graph);
     const positions = savePositions(graph);
     setPreviousPositions(positions);
     if (layoutController) layoutController.setPreviousPositions(positions);
@@ -266,14 +273,14 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
       sigmaInstance.refresh({ skipIndexation: true });
       freezeGridBBox();
     }
-    attachPreviewGraph();
+    attachPreviewGraph(true);
   }
 
   function attachPreviewGraph(forceCircle = false) {
     if (!sigmaInstance || !uiState.currentGraph) return;
     if (forceCircle || isFirstAttach) {
       isFirstAttach = false;
-      circular.assign(uiState.currentGraph, { scale: 100 });
+      assignUnitCircle(uiState.currentGraph);
     }
     // Build preview graph with best params (or current settings when not auto-tuning)
     const params = getCurrentFA2Settings();
@@ -305,7 +312,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     stopLayoutStore();
     trainer?.stop();
     if (uiState.currentGraph) {
-      circular.assign(uiState.currentGraph, { scale: 100 });
+      assignUnitCircle(uiState.currentGraph);
       const positions = savePositions(uiState.currentGraph);
       setPreviousPositions(positions);
       if (layoutController) layoutController.setPreviousPositions(positions);
@@ -327,7 +334,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
       iterationsPerSec: 0,
     };
     if (uiState.currentGraph) {
-      circular.assign(uiState.currentGraph, { scale: 100 });
+      assignUnitCircle(uiState.currentGraph);
       const positions = savePositions(uiState.currentGraph);
       setPreviousPositions(positions);
       if (layoutController) layoutController.setPreviousPositions(positions);
@@ -372,7 +379,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
   function buildPreviewGraphFn(params: FA2Params, iterations = 800): Graph | null {
     if (!uiState.currentGraph || uiState.currentGraph.order === 0) return null;
     const g = uiState.currentGraph.copy();
-    circular.assign(g, { scale: 100 });
+    assignUnitCircle(g);
     for (let i = 0; i < iterations; i++) {
       forceAtlas2.assign(g, { iterations: 1, settings: { ...params } });
     }
@@ -457,6 +464,19 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
       });
     }
 
+    // Sigma only listens to window resizes, so watch the container directly:
+    // when the bottom pane opens/closes (or the sidebar collapses) the graph
+    // area resizes and the canvas must follow.
+    if (typeof ResizeObserver !== "undefined" && host) {
+      containerObserver = new ResizeObserver(() => {
+        if (!sigmaInstance) return;
+        sigmaInstance.refresh({ skipIndexation: true });
+        grid?.draw();
+        resizeTrailCanvas();
+      });
+      containerObserver.observe(host);
+    }
+
     s.getCamera().addListener("updated", () => {
       grid?.draw();
       if (untrack(() => showTrails)) drawTrails();
@@ -523,6 +543,23 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     if (sigmaInstance) { sigmaInstance.kill(); sigmaInstance = null; }
   }
 
+  function resizeTrailCanvas() {
+    const c = trailCanvas;
+    if (!c) return;
+    const dpr = devicePixelRatio || 1;
+    const cssW = host?.clientWidth ?? c.width / dpr;
+    const cssH = host?.clientHeight ?? c.height / dpr;
+    const pxW = Math.round(cssW * dpr);
+    const pxH = Math.round(cssH * dpr);
+    if (c.width !== pxW || c.height !== pxH) {
+      c.width = pxW;
+      c.height = pxH;
+      c.style.width = cssW + "px";
+      c.style.height = cssH + "px";
+      clearTrails();
+    }
+  }
+
   function freezeGridBBox() {
     if (!sigmaInstance || !uiState.currentGraph || uiState.currentGraph.order === 0) return;
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -555,6 +592,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
   function drawTrails() {
     const c = trailCanvas;
     if (!c || !sigmaInstance || !uiState.currentGraph) return;
+    resizeTrailCanvas();
     const ctx = c.getContext("2d");
     if (!ctx) return;
     const dpr = devicePixelRatio || 1;
@@ -596,9 +634,9 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
   });
 </script>
 
-<div class="flex flex-col h-screen bg-base-100 text-base-content">
+<div class="flex flex-col h-screen overflow-auto bg-base-100 text-base-content">
   <!-- Top area: sidebar + graph -->
-  <div class="flex-1 flex min-h-0">
+  <div class="flex-1 flex min-h-[420px]">
     <!-- Left sidebar: tabs + settings -->
     <div class="w-72 shrink-0 border-r border-base-300 bg-base-200 flex flex-col relative {sidebarOpen ? '' : 'hidden'}">
       <div
@@ -680,17 +718,17 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
               <fieldset class="fieldset border border-base-300 rounded-box p-2">
                 <legend class="fieldset-legend text-xs">Bounds · dashed = clamp box</legend>
                 <div class="flex flex-col gap-1.5">
-                  <label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer" title="Clamp every node to [−max, +max] on each axis each layout tick">
+                  <label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer" title="Clamp every node to ± half-width on each axis each layout tick">
                     <input type="checkbox" bind:checked={uiState.enforceBounds} class="checkbox checkbox-xs" />
                     Clamp to box
                   </label>
-                  <label class="flex items-center gap-2 text-xs font-mono" title="Max |x| — nodes clamped to ± this">
-                    <span class="w-14 shrink-0 opacity-70">Max |x|</span>
+                  <label class="flex items-center gap-2 text-xs font-mono" title="Half-width — nodes clamped to ± this (origin-centered)">
+                    <span class="w-14 shrink-0 opacity-70">Half-w</span>
                     <input type="range" min="50" max="2000" step="50" bind:value={uiState.boundsMaxX} class="range range-xs flex-1" disabled={!uiState.enforceBounds} />
                     <span class="w-10 text-right shrink-0">{uiState.boundsMaxX}</span>
                   </label>
-                  <label class="flex items-center gap-2 text-xs font-mono" title="Max |y| — nodes clamped to ± this">
-                    <span class="w-14 shrink-0 opacity-70">Max |y|</span>
+                  <label class="flex items-center gap-2 text-xs font-mono" title="Half-height — nodes clamped to ± this (origin-centered)">
+                    <span class="w-14 shrink-0 opacity-70">Half-h</span>
                     <input type="range" min="50" max="1500" step="50" bind:value={uiState.boundsMaxY} class="range range-xs flex-1" disabled={!uiState.enforceBounds} />
                     <span class="w-10 text-right shrink-0">{uiState.boundsMaxY}</span>
                   </label>
@@ -717,14 +755,14 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
               <div class="flex items-center gap-2 text-xs font-mono">
                 <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Total number of nodes">
                   <span class="w-24">Nodes</span>
-                  <input type="range" min="10" max="2000" step="10" bind:value={uiState.nodeCount} class="range range-xs flex-1" />
+                  <input type="range" min="1" max="100" step="1" bind:value={uiState.nodeCount} class="range range-xs flex-1" />
                   <span class="w-10 text-right shrink-0">{uiState.nodeCount}</span>
                 </label>
               </div>
               <div class="flex items-center gap-2 text-xs font-mono">
                 <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Number of clusters">
                   <span class="w-24">Clusters</span>
-                  <input type="range" min="1" max="50" step="1" bind:value={uiState.clusterCount} class="range range-xs flex-1" />
+                  <input type="range" min="1" max="20" step="1" bind:value={uiState.clusterCount} class="range range-xs flex-1" />
                   <span class="w-10 text-right shrink-0">{uiState.clusterCount}</span>
                 </label>
               </div>
@@ -736,26 +774,30 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
                 </label>
               </div>
               <div class="flex items-center gap-2 text-xs font-mono">
-                <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Use fixed seed for reproducibility">
-                  <input type="checkbox" bind:checked={uiState.useFixedSeed} class="checkbox checkbox-xs" />
-                  Fixed Seed
+                <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Deterministic seed — the graph is identical for the same seed and settings">
+                  <span class="w-24 shrink-0">Seed</span>
+                  <input type="number" min="0" max="2147483647" step="1" bind:value={uiState.fixedSeed} class="input input-xs input-bordered flex-1" />
                 </label>
-                <input type="number" min="0" max="2147483647" step="1" bind:value={uiState.fixedSeed} class="input input-xs input-bordered w-20" disabled={!uiState.useFixedSeed} />
+              </div>
+              <div class="flex items-center gap-2 text-xs font-mono">
+                <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Only create edges between nodes in the same cluster">
+                  <input type="checkbox" bind:checked={uiState.onlyWithinCluster} onchange={() => setOnlyWithinCluster(uiState.onlyWithinCluster)} class="checkbox checkbox-xs" />
+                  Only within cluster
+                </label>
               </div>
 
               <div class="mt-2 flex flex-col gap-1">
                 <div class="text-[10px] uppercase tracking-wide opacity-60">Est. edges: {estEdgeCount} {estEdgeCount > MAX_EDGES ? '⚠️' : ''} / {MAX_EDGES} max</div>
                 <div class="text-[10px] uppercase tracking-wide opacity-60">Clamped: {clampNodeCount({ nodeCount: uiState.nodeCount, clusterCount: uiState.clusterCount, degreeRatio: uiState.degreeRatio, seed: uiState.fixedSeed }).nodeCount !== uiState.nodeCount ? 'yes' : 'no'}</div>
+                <div class="text-[10px] uppercase tracking-wide opacity-60">Regenerates automatically when settings change</div>
               </div>
-
-<button class="btn btn-sm btn-block mt-2" onclick={rebuildGraph}>Regenerate Graph</button>
             </div>
           {/if}
         </div>
       </div>
 
     <!-- Graph canvas -->
-    <div class="flex-1 relative min-w-0" bind:this={host}>
+    <div class="flex-1 relative min-h-[420px] min-w-[480px]" bind:this={host}>
       <canvas class="absolute inset-0" bind:this={trailCanvas}></canvas>
       <DebugOverlay visible={debugOverlayVisible} stats={layoutState.tickStats} />
       <div class="absolute top-2 right-2 flex flex-col gap-1">
@@ -775,7 +817,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
       <button class="btn btn-sm btn-ghost bg-base-300/80 backdrop-blur ml-auto" onclick={toggleBottomOpen}>{uiState.bottomOpen ? "▼" : "▲"}</button>
     </div>
     {#if uiState.bottomOpen}
-      <div class="overflow-y-auto px-3 pb-2" style="max-height: 22rem; min-height: 22rem;">
+      <div class="overflow-y-auto px-3 pb-2" style="max-height: min(22rem, 45vh); min-height: min(22rem, 45vh);">
         {#if uiState.bottomTab === 'live'}
           <LiveViewPanel stats={layoutState.tickStats} running={layoutState.running} />
         {:else if uiState.bottomTab === 'autotune'}

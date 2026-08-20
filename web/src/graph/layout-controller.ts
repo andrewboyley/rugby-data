@@ -1,11 +1,11 @@
 import Graph from "graphology";
-import { circular } from "graphology-layout";
 import type { FA2Params } from "./layout-optimizer";
 import type { LayoutTickStats } from "./layout";
 import { computeTickStats, sanitizePositions } from "./layout-utils";
 import type { FeatureNormalizer } from "./layout-optimizer";
 import { runForceAtlas2 } from "./forceatlas2-wrapper";
 import type { ForceAtlas2SynchronousLayoutParameters } from "graphology-layout-forceatlas2";
+import { assignUnitCircle } from "./graph-generator";
 
 export type LayoutControllerOptions = {
   graph: Graph;
@@ -54,8 +54,8 @@ export class LayoutController {
     this.optimizer = optimizer;
   }
 
-  resetToCircle(scale = 100) {
-    circular.assign(this.graph, { scale });
+  resetToCircle() {
+    assignUnitCircle(this.graph);
     this.previousPositions = this.savePositions();
   }
 
