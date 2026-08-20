@@ -264,6 +264,12 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
 
     // Reset to circle and update sigma
     assignUnitCircle(graph);
+    // Scale positions to ~28.4 width so graph-to-viewport ratio ~500 for visibility
+    const RENDER_SCALE = 28.4;
+    graph.forEachNode((node, attr) => {
+      graph.setNodeAttribute(node, "x", attr.x * RENDER_SCALE);
+      graph.setNodeAttribute(node, "y", attr.y * RENDER_SCALE);
+    });
     const positions = savePositions(graph);
     setPreviousPositions(positions);
     if (layoutController) layoutController.setPreviousPositions(positions);
@@ -281,7 +287,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     if (!sigmaInstance || !uiState.currentGraph) return;
     if (forceCircle || isFirstAttach) {
       isFirstAttach = false;
-      assignUnitCircle(uiState.currentGraph);
+      // assignUnitCircle(uiState.currentGraph); // Already done in rebuildGraph with scaling
     }
     // Build preview graph with best params (or current settings when not auto-tuning)
     const params = getCurrentFA2Settings();
@@ -380,7 +386,8 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
   function buildPreviewGraphFn(params: FA2Params, iterations = 800): Graph | null {
     if (!uiState.currentGraph || uiState.currentGraph.order === 0) return null;
     const g = uiState.currentGraph.copy();
-    assignUnitCircle(g);
+    // Use current positions (already scaled) instead of resetting to unit circle
+    // assignUnitCircle(g);
     for (let i = 0; i < iterations; i++) {
       forceAtlas2.assign(g, { iterations: 1, settings: { ...params } });
     }
@@ -450,7 +457,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
         nodes: [{ color: { attribute: "color" }, size: { attribute: "size" } }],
         edges: [{ color: { attribute: "color" } }],
       },
-      settings: { allowInvalidContainer: true, itemSizesReference: "graph" },
+      settings: { allowInvalidContainer: true, itemSizesReference: "screen" },
     });
     sigmaInstance = s;
     (window as any).__sigma = s;

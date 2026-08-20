@@ -116,9 +116,9 @@ for (let i = 0; i < nodeCount; i++) {
     }
   }
 
-  // Set node sizes based on degree
-  const minSize = 0.015;
-  const maxSize = 0.05;
+  // Set node sizes based on degree (in pixels, since itemSizesReference: "screen")
+  const minSize = 5;
+  const maxSize = 15;
   let minDegree = Infinity;
   let maxDegree = -Infinity;
   graph.forEachNode((id) => {
