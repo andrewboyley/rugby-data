@@ -668,10 +668,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
             />
 
               <fieldset class="fieldset border border-base-300 rounded-box p-2">
-                <legend class="fieldset-legend text-xs flex items-center gap-1">
-                  Options
-                  <span class="badge badge-xs badge-ghost">🔒 = locked from optimizer</span>
-                </legend>
+                <legend class="fieldset-legend text-xs">Options</legend>
                 <div class="flex flex-col gap-1">
                   {#each [
                     { key: "strongGravityMode", label: "Strong Gravity", title: "Force all nodes toward center regardless of edges" },
@@ -691,7 +688,6 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
                         }} />
                         {item.label}
                       </label>
-                      <button type="button" class="btn btn-xs btn-ghost px-1 min-h-0 h-5 {optimizerState.lockedParams.has(item.key) ? 'text-warning' : 'text-base-content/30'}" onclick={() => handleLockToggle(item.key)} title="Lock from optimizer">{optimizerState.lockedParams.has(item.key) ? '🔒' : '🔓'}</button>
                     </div>
                   {/each}
                 </div>
@@ -800,94 +796,16 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     <div class="flex-1 relative min-h-[420px] min-w-[480px]" bind:this={host}>
       <canvas class="absolute inset-0" bind:this={trailCanvas}></canvas>
       <DebugOverlay visible={debugOverlayVisible} stats={layoutState.tickStats} />
-      <div class="absolute top-2 right-2 flex flex-col gap-1">
-        <button class="btn btn-sm btn-ghost btn-circle" onclick={() => sidebarOpen = !sidebarOpen} title="Toggle sidebar">☰</button>
-        <button class="btn btn-sm btn-ghost btn-circle" onclick={() => debugOverlayVisible = !debugOverlayVisible} title="Toggle debug overlay">🐛</button>
-        <button class="btn btn-sm btn-ghost btn-circle" onclick={goHome} title="Back to main">←</button>
-      </div>
     </div>
   </div>
 
-  <!-- Bottom: tabbed Live View / Auto-tune -->
+  <!-- Bottom: Live View / Auto-tune (no tabs, always show live) -->
   <div class="shrink-0 border-t border-base-300 bg-base-200 flex flex-col relative">
-    <button class="h-2 w-full shrink-0 cursor-pointer hover:bg-primary/20" onclick={toggleBottomOpen} title="Click to toggle bottom panel" aria-label="Toggle bottom panel"></button>
-    <div class="tabs tabs-lift tabs-sm p-1" role="tablist" aria-label="Bottom tabs">
-      <button role="tab" aria-selected={uiState.bottomTab === 'live'} class="tab tab-sm {uiState.bottomTab === 'live' ? 'tab-active' : ''}" onclick={() => setBottomTab('live')} title="Live layout metrics">Live View</button>
-      <button role="tab" aria-selected={uiState.bottomTab === 'autotune'} class="tab tab-sm {uiState.bottomTab === 'autotune' ? 'tab-active' : ''}" onclick={() => setBottomTab('autotune')} title="Auto-tune FA2 parameters">Auto-tune</button>
-      <button class="btn btn-sm btn-ghost bg-base-300/80 backdrop-blur ml-auto" onclick={toggleBottomOpen}>{uiState.bottomOpen ? "▼" : "▲"}</button>
+    <div class="overflow-y-auto px-3 pb-2" style="max-height: min(22rem, 45vh); min-height: min(22rem, 45vh);">
+      <LiveViewPanel stats={layoutState.tickStats} running={layoutState.running} />
     </div>
-    {#if uiState.bottomOpen}
-      <div class="overflow-y-auto px-3 pb-2" style="max-height: min(22rem, 45vh); min-height: min(22rem, 45vh);">
-        {#if uiState.bottomTab === 'live'}
-          <LiveViewPanel stats={layoutState.tickStats} running={layoutState.running} />
-        {:else if uiState.bottomTab === 'autotune'}
-          <fieldset class="fieldset rounded-box p-2 overflow-x-hidden mt-1">
-            <div class="flex flex-wrap items-center gap-1.5 mt-1">
-              <button type="button" class="btn btn-xs {optimizerState.autoTune ? 'btn-success' : 'btn-primary'}" onclick={handleAutoTuneToggle} title="{optimizerState.autoTune ? 'Stop optimizing and apply the best parameters found so far' : 'Start optimizing FA2 parameters against the heuristic'}">
-                {optimizerState.autoTune ? 'Stop optimizing' : 'Start optimizing'}
-              </button>
-            </div>
-            <label class="flex items-center gap-2 text-xs font-mono mt-2" title="Seconds each candidate layout runs before it is scored and (on rejection) rolled back — the episode length">
-              <span class="w-24 shrink-0">Episode len</span>
-              <input type="range" min="0.5" max="10" step="0.5" bind:value={optimizerState.episodeLength} onchange={() => setEpisodeLength(optimizerState.episodeLength)} class="range range-xs flex-1" />
-              <span class="w-12 text-right shrink-0">{optimizerState.episodeLength.toFixed(1)} s</span>
-            </label>
-
-            <div class="mt-2 flex flex-col gap-1">
-              <div class="text-[10px] uppercase tracking-wide opacity-60">Weights · click effect icon to flip reward/penalise · click name to mute · w = weight · val = feature · H = live contribution{#if optimizerState.autoTune && !optimizer.isCalibrated()} · calibrating…{/if}</div>
-              {#each Object.keys(optimizerState.weights) as k}
-                <FeatureTooltip k={k} class="flex items-center gap-1.5 text-xs font-mono min-w-0 {optimizerState.ignoreWeights[k] ? 'opacity-40' : ''}">
-                  <label class="cursor-pointer shrink-0" title="Ignore this weight (force to 0)">
-                    <input type="checkbox" checked={optimizerState.ignoreWeights[k]} onchange={() => toggleIgnoreWeight(k)} class="checkbox checkbox-xs checkbox-ghost" />
-                  </label>
-                  <span class="w-16 shrink-0 truncate cursor-pointer" title="{optimizerState.weights[k]}" onclick={() => toggleIgnoreWeight(k)}>{k}</span>
-                  <button type="button" class="badge badge-xs {optimizerState.signs[k] === 1 ? 'badge-success' : 'badge-error'} shrink-0 cursor-pointer" onclick={() => { optimizerState.signs[k] = optimizerState.signs[k] === 1 ? -1 : 1; optimizer.setSigns({ ...optimizerState.signs }); }}>{optimizerState.signs[k] === 1 ? '+' : '−'}</button>
-                  <input type="range" min="0" max="3" step="0.1" bind:value={optimizerState.weights[k]} class="range range-xs flex-1 min-w-0" disabled={optimizerState.ignoreWeights[k]} />
-                  <span class="w-8 text-right shrink-0">{fmt(optimizerState.weights[k])}</span>
-                  <span class="w-10 text-right shrink-0 font-mono" style="color: var(--p);">{optimizerState.optimState?.featureView ? fmt((optimizerState.optimState.featureView as unknown as Record<string, number>)[k] ?? 0) : '—'}</span>
-                  <span class="w-10 text-right shrink-0 font-mono" style="color: var(--p);">{fmt(optimizerState.optimState?.featureView ? ((optimizerState.signs[k] as 1 | -1) * optimizerState.weights[k] * (optimizerState.optimState.featureView as unknown as Record<string, number>)[k] ?? 0) : 0)}</span>
-                </FeatureTooltip>
-              {/each}
-            </div>
-
-            <div class="mt-2">
-              <div class="text-[10px] uppercase tracking-wide opacity-60 mb-1">Episode reward · mean per episode (legend = latest)</div>
-              <ScorePlot series={tuneSeries()} />
-            </div>
-
-            {#if optimizerState.optimState}
-              <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
-                <div class="font-mono">
-                  <div>Best params view</div>
-                  <div>Iter: {optimizerState.optimState.episode}</div>
-                  <div class="text-[10px] opacity-70">{formatParams(optimizerState.optimState.bestParams)}</div>
-                </div>
-                <div class="font-mono">
-                  <div>Trainer</div>
-                  <div>{optimizerState.trainerStats.totalEpisodes} (background)</div>
-                  <div class="text-[10px] opacity-70">Ep/s: {optimizerState.trainerStats.episodesPerSec.toFixed(1)}</div>
-                </div>
-                <div class="font-mono col-span-2">
-                  <div>Episodes: {optimizerState.trainerStats.totalEpisodes}</div>
-                  <div class="text-[10px] opacity-70">Iters/s: {optimizerState.trainerStats.iterationsPerSec.toFixed(0)} | Time: {optimizerState.trainerStats.trainingTime.toFixed(1)}s</div>
-                </div>
-                <div class="font-mono col-span-2">
-                  <div>Best reward: {optimizerState.trainerStats.bestReward.toFixed(3)}</div>
-                  <div class="text-[10px] opacity-70">Exploration {optimizerState.optimState.explorationPct}% / Exploitation {optimizerState.optimState.exploitationPct}%</div>
-                </div>
-              </div>
-            {/if}
-
-            <div class="mt-2 flex flex-wrap gap-1">
-              <button class="btn btn-xs btn-primary" onclick={() => copyBestParams()}>Copy Best Params</button>
-              <button class="btn btn-xs btn-secondary" onclick={() => applyBestParams()}>Apply Best</button>
-            </div>
-          </fieldset>
-        {/if}
-      </div>
-    {/if}
   </div>
-  </div>
+</div>
 <script context="module">
   function formatParams(p: FA2Params): string {
     const PARAM_SHORT: Record<string, string> = {
