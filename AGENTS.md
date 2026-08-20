@@ -105,7 +105,24 @@ Builds dataset of international rugby union matches from ESPN CORE API + World R
 
 ## Tools to Use
 
-- **cocoindex-code** / **codegraph** — search/understand codebase
-- **chrome-devtools** — debug web app (port 5173 or 8787)
-- **just** — all project commands
-- **uv** — Python package management
+ - **cocoindex-code** / **codegraph** — search/understand codebase
+ - **chrome-devtools** — debug web app (port 5173 or 8787)
+ - **just** — all project commands
+ - **uv** — Python package management
+
+## Agent configuration (opencode)
+
+Agent behaviour for opencode is configured in `opencode.json` at the repo
+root (safe to commit). It:
+
+- ignores caches/build dirs in the file watcher (`node_modules/`, `dist/`,
+  `.venv/`, `.codegraph/`, `.cocoindex_code/`, `data/api_cache.json`,
+  `test-results/`) to cut change-notification noise;
+- prunes old tool output during context compaction to keep long sessions
+  within token limits;
+- registers slash commands `/check`, `/lint`, `/build`, `/serve` for the
+  common verify/build loops.
+
+When editing this repo, prefer the `just` commands above and the code-intel
+tools (codegraph for structure, chrome-devtools for the running viewer), and
+run `just check-python` / `just check-web` after changes.
