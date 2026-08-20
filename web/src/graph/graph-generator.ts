@@ -81,7 +81,7 @@ export function generateGraph(spec: GraphSpec): GraphGenResult {
     graph.addNode(i, {
       x: rand(),
       y: rand(),
-      size: 12 + rand() * 8,
+      size: 0.02 + rand() * 0.015,
       color: clusterColor(i),
     });
   }

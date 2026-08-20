@@ -449,7 +449,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
         nodes: [{ color: { attribute: "color" }, size: { attribute: "size" } }],
         edges: [{ color: { attribute: "color" } }],
       },
-      settings: { allowInvalidContainer: true, itemSizesReference: "screen" },
+      settings: { allowInvalidContainer: true, itemSizesReference: "graph" },
     });
     sigmaInstance = s;
     (window as any).__sigma = s;
