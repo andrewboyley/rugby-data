@@ -20,9 +20,9 @@
 
   let { key, label, min, max, step, type, params, locked, autoTune, bestParams, onChange, onLockToggle, title, format = (v: number) => parseFloat(v.toFixed(3)).toString() }: Props = $props();
 
-  const isLocked = locked.has(key);
-  const disabled = autoTune && !isLocked;
-  const displayValue = autoTune && bestParams ? bestParams[key] : params[key];
+  const isLocked = $derived(locked.has(key));
+  const disabled = $derived(autoTune && !isLocked);
+  const displayValue = $derived(autoTune && bestParams ? bestParams[key] : params[key]);
 
   function handleSliderInput(e: Event) {
     if (!autoTune || isLocked) {

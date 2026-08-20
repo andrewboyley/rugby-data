@@ -298,16 +298,16 @@ const contInit = (key: string): number => CONT_DIMS.find((d) => d.key === key)?.
 
 function blankParams(): FA2Params {
 	return {
-		gravity: 1,
+		gravity: 0.1,
 		slowDown: 1,
-		scalingRatio: 10,
-		strongGravityMode: false,
+		scalingRatio: 1,
+		strongGravityMode: true,
 		barnesHutOptimize: true,
 		barnesHutTheta: 0.5,
 		edgeWeightInfluence: 1,
-		outboundAttractionDistribution: false,
+		outboundAttractionDistribution: true,
 		linLogMode: false,
-		adjustSizes: false,
+		adjustSizes: true,
 	};
 }
 

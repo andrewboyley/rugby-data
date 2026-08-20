@@ -4,7 +4,8 @@
   import forceAtlas2 from "graphology-layout-forceatlas2";
   import Sigma from "sigma";
   import { sdfCircle } from "sigma/rendering";
-  import { getCameraStateToFitViewportToNodes } from "@sigma/utils";
+  import type { NodeReducer, EdgeReducer } from "sigma/types";
+import { fitViewportToNodes } from "@sigma/utils";
 import LiveViewPanel from "./LiveViewPanel.svelte";
 import ScorePlot, { type PlotSeries } from "./ScorePlot.svelte";
 import DebugOverlay from "./DebugOverlay.svelte";
@@ -17,7 +18,7 @@ import { FA2OptimizerAdapter } from "./graph";
 import { generateGraph, estimateEdges, clampNodeCount, MAX_EDGES, savePositions, assignUnitCircle } from "./graph";
 import { layoutState, startLayout as startLayoutStore, stopLayout as stopLayoutStore, resetLayoutState, recordTick, setHeuristicFeatures, setPreviousPositions } from "./stores/layout-store.svelte";
 import { optimizerState, setAutoTune, setEpisodeLength, setWeights, setSigns, toggleIgnoreWeight, toggleLock, setLockedParams, updateTrainerStats, addEpisodeMean } from "./stores/optimizer-store.svelte";
-import { uiState, setGraph, setSettingsTab, setBottomTab, toggleBottomOpen, setNodeCount, setClusterCount, setDegreeRatio, setFixedSeed, setOnlyWithinCluster, setAutoFit, setShowGrid, setShowTrails, setTrailOpacity, setEnforceBounds, setBoundsMaxX, setBoundsMaxY } from "./stores/ui-store.svelte";
+  import { uiState, setGraph, setSettingsTab, setBottomTab, toggleBottomOpen, setNodeCount, setClusterCount, setDegreeRatio, setEdgeWeight, setFixedSeed, setOnlyWithinCluster, setAutoFit, setShowGrid, setShowTrails, setTrailOpacity } from "./stores/ui-store.svelte";
 import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
 
   const CONTEXT_DIM = 4;
@@ -37,13 +38,25 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
   let trailOpacity = 0.55;
   let trailHistory = new Map<string, { x: number; y: number }[]>();
   let focusSet = new Set<string>();
-  let suppressCameraUpdate = false;
   let sidebarOpen = $state(true);
   let debugOverlayVisible = false;
 
   let layoutController: LayoutController | null = null;
   let trainer: LayoutTrainer | null = null;
   let optimizer = new FA2OptimizerAdapter(true);
+  const DEFAULT_FA2_SETTINGS: FA2Params = {
+    gravity: 0.1,
+    slowDown: 1,
+    scalingRatio: 1,
+    strongGravityMode: true,
+    barnesHutOptimize: true,
+    barnesHutTheta: 0.5,
+    edgeWeightInfluence: 1,
+    outboundAttractionDistribution: true,
+    linLogMode: false,
+    adjustSizes: true,
+  };
+  let fa2Settings = $state<FA2Params>({ ...DEFAULT_FA2_SETTINGS });
 
   function handleAutoTuneToggle() {
     const next = !optimizerState.autoTune;
@@ -69,6 +82,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     nodeCount: uiState.nodeCount,
     clusterCount: uiState.clusterCount,
     degreeRatio: uiState.degreeRatio,
+    edgeWeight: uiState.edgeWeight,
     seed: uiState.fixedSeed,
   }));
 
@@ -78,9 +92,10 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
       nodeCount: uiState.nodeCount,
       clusterCount: uiState.clusterCount,
       degreeRatio: uiState.degreeRatio,
+      edgeWeight: uiState.edgeWeight,
       seed: uiState.fixedSeed,
     });
-    const bounded = Math.max(1, Math.min(100, clamped.nodeCount));
+    const bounded = Math.max(1, Math.min(1000, clamped.nodeCount));
     if (bounded !== uiState.nodeCount) {
       setNodeCount(bounded);
     }
@@ -92,6 +107,13 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
       optimizer.setWeights(effectiveWeights());
       optimizer.setSigns({ ...optimizerState.signs });
     }
+  });
+
+  $effect(() => {
+    const autoFit = uiState.autoFit;
+    const showGrid = uiState.showGrid;
+    if (showGrid) grid?.draw();
+    if (autoFit) fitCamera(true);
   });
 
   // Persist UI settings
@@ -118,15 +140,13 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
         nodeCount: uiState.nodeCount,
         clusterCount: uiState.clusterCount,
         degreeRatio: uiState.degreeRatio,
+        edgeWeight: uiState.edgeWeight,
         fixedSeed: uiState.fixedSeed,
         onlyWithinCluster: uiState.onlyWithinCluster,
         autoFit: uiState.autoFit,
         showGrid: uiState.showGrid,
         showTrails: uiState.showTrails,
         trailOpacity: uiState.trailOpacity,
-        enforceBounds: uiState.enforceBounds,
-        boundsMaxX: uiState.boundsMaxX,
-        boundsMaxY: uiState.boundsMaxY,
       };
       localStorage.setItem(uiState.storageKey, JSON.stringify(data));
     } catch { /* ignore */ }
@@ -155,6 +175,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
         if (data.nodeCount) setNodeCount(data.nodeCount);
         if (data.clusterCount) setClusterCount(data.clusterCount);
         if (data.degreeRatio) setDegreeRatio(data.degreeRatio);
+        if (data.edgeWeight) setEdgeWeight(data.edgeWeight);
         if (data.fixedSeed) setFixedSeed(data.fixedSeed);
         if (data.onlyWithinCluster !== undefined) setOnlyWithinCluster(data.onlyWithinCluster);
         
@@ -162,9 +183,6 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
         if (data.showGrid !== undefined) setShowGrid(data.showGrid);
         if (data.showTrails !== undefined) setShowTrails(data.showTrails);
         if (data.trailOpacity !== undefined) setTrailOpacity(data.trailOpacity);
-        if (data.enforceBounds !== undefined) setEnforceBounds(data.enforceBounds);
-        if (data.boundsMaxX !== undefined) setBoundsMaxX(data.boundsMaxX);
-        if (data.boundsMaxY !== undefined) setBoundsMaxY(data.boundsMaxY);
       }
     } catch { /* ignore */ }
   });
@@ -178,6 +196,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     uiState.nodeCount;
     uiState.clusterCount;
     uiState.degreeRatio;
+    uiState.edgeWeight;
     uiState.fixedSeed;
     uiState.onlyWithinCluster;
     if (!host) return;
@@ -192,6 +211,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
       nodeCount: uiState.nodeCount,
       clusterCount: uiState.clusterCount,
       degreeRatio: uiState.degreeRatio,
+      edgeWeight: uiState.edgeWeight,
       seed: uiState.fixedSeed,
       onlyWithinCluster: uiState.onlyWithinCluster,
     });
@@ -199,12 +219,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     setGraph(graph);
 
     if (layoutController) {
-      layoutController.updateSettings(optimizerState.optimState?.bestParams ?? {
-        gravity: 1, slowDown: 1, scalingRatio: 10, strongGravityMode: false,
-        barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1,
-        outboundAttractionDistribution: false, linLogMode: false, adjustSizes: false,
-      });
-      layoutController.updateBounds(uiState.enforceBounds, uiState.boundsMaxX, uiState.boundsMaxY);
+      layoutController.updateSettings(getCurrentFA2Settings());
     }
 
     if (trainer) {
@@ -221,14 +236,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     // Recreate layout controller with new graph
     layoutController = new LayoutController({
       graph,
-      settings: optimizerState.optimState?.bestParams ?? {
-        gravity: 1, slowDown: 1, scalingRatio: 10, strongGravityMode: false,
-        barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1,
-        outboundAttractionDistribution: false, linLogMode: false, adjustSizes: false,
-      },
-      enforceBounds: uiState.enforceBounds,
-      boundsMaxX: uiState.boundsMaxX,
-      boundsMaxY: uiState.boundsMaxY,
+      settings: getCurrentFA2Settings(),
       optimizer: { featureView: (stat) => optimizer.featureView(stat) },
     });
 
@@ -264,12 +272,6 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
 
     // Reset to circle and update sigma
     assignUnitCircle(graph);
-    // Scale positions to ~28.4 width so graph-to-viewport ratio ~500 for visibility
-    const RENDER_SCALE = 28.4;
-    graph.forEachNode((node, attr) => {
-      graph.setNodeAttribute(node, "x", attr.x * RENDER_SCALE);
-      graph.setNodeAttribute(node, "y", attr.y * RENDER_SCALE);
-    });
     const positions = savePositions(graph);
     setPreviousPositions(positions);
     if (layoutController) layoutController.setPreviousPositions(positions);
@@ -277,10 +279,10 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     if (sigmaInstance) {
       sigmaInstance.setGraph(graph);
       sigmaInstance.refresh();
-      freezeGridBBox();
-      fitCamera(false);
+      if (uiState.autoFit) fitCamera(false);
     }
-    attachPreviewGraph(true);
+    // Don't call attachPreviewGraph - it replaces the graph and loses camera fit
+    // attachPreviewGraph(true);
   }
 
   function attachPreviewGraph(forceCircle = false) {
@@ -295,13 +297,17 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     if (preview) {
       previewGraph = preview;
       sigmaInstance.setGraph(previewGraph);
-      sigmaInstance.refresh({ skipIndexation: true });
-      freezeGridBBox();
+      sigmaInstance.refresh();
     }
   }
 
   function startLayoutFn() {
     if (!uiState.currentGraph || layoutState.running) return;
+    previewParams = null;
+    previewGraph = null;
+    layoutController?.setGraph(uiState.currentGraph);
+    sigmaInstance?.setGraph(uiState.currentGraph);
+    sigmaInstance?.refresh();
     startLayoutStore();
     optimizer.setWeights(effectiveWeights());
     optimizer.setSigns({ ...optimizerState.signs });
@@ -319,16 +325,19 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     stopLayoutStore();
     trainer?.stop();
     if (uiState.currentGraph) {
-      assignUnitCircle(uiState.currentGraph);
       const positions = savePositions(uiState.currentGraph);
       setPreviousPositions(positions);
       if (layoutController) layoutController.setPreviousPositions(positions);
+      previewParams = null;
+      previewGraph = null;
+      sigmaInstance?.setGraph(uiState.currentGraph);
+      sigmaInstance?.refresh();
     }
-    attachPreviewGraph();
   }
 
   function resetAll() {
     stopLayoutFn();
+    resetLayoutState();
     setAutoTune(false);
     optimizerState.currentEpisodeParams = null;
     optimizerState.optimState = null;
@@ -346,22 +355,22 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
       setPreviousPositions(positions);
       if (layoutController) layoutController.setPreviousPositions(positions);
     }
-    attachPreviewGraph();
+    previewParams = null;
+    previewGraph = null;
+    if (sigmaInstance && uiState.currentGraph) {
+      sigmaInstance.refresh();
+      grid?.draw();
+      if (uiState.autoFit) {
+        requestAnimationFrame(() => fitCamera(false));
+      }
+    }
   }
 
   function getCurrentFA2Settings(): FA2Params {
-    return {
-      gravity: optimizerState.optimState?.bestParams?.gravity ?? 1,
-      slowDown: optimizerState.optimState?.bestParams?.slowDown ?? 1,
-      scalingRatio: optimizerState.optimState?.bestParams?.scalingRatio ?? 10,
-      strongGravityMode: optimizerState.optimState?.bestParams?.strongGravityMode ?? false,
-      barnesHutOptimize: optimizerState.optimState?.bestParams?.barnesHutOptimize ?? true,
-      barnesHutTheta: optimizerState.optimState?.bestParams?.barnesHutTheta ?? 0.5,
-      edgeWeightInfluence: optimizerState.optimState?.bestParams?.edgeWeightInfluence ?? 1,
-      outboundAttractionDistribution: optimizerState.optimState?.bestParams?.outboundAttractionDistribution ?? false,
-      linLogMode: optimizerState.optimState?.bestParams?.linLogMode ?? false,
-      adjustSizes: optimizerState.optimState?.bestParams?.adjustSizes ?? false,
-    };
+    const settings = optimizerState.autoTune
+      ? (optimizerState.optimState?.bestParams ?? fa2Settings)
+      : fa2Settings;
+    return { ...settings, scalingRatio: 1, adjustSizes: true };
   }
 
   function effectiveWeights(): HeuristicWeights {
@@ -417,7 +426,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
       previewParams = null;
       previewFrame = 0;
     }
-    if (sigmaInstance) sigmaInstance.refresh({ skipIndexation: true });
+    if (sigmaInstance) sigmaInstance.refresh();
   }
 
   function runLayoutChunk() {
@@ -439,11 +448,11 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     // Preview loop - always animate the best-params graph
     stepPreview(dt);
 
-    if (sigmaInstance) sigmaInstance.refresh({ skipIndexation: true });
-    if (uiState.showGrid || uiState.enforceBounds) grid?.draw();
+    if (sigmaInstance) {
+      if (uiState.autoFit) fitCamera(false);
+      sigmaInstance.refresh();
+    }
     if (showTrails) drawTrails();
-    if (uiState.autoFit) fitCamera(false);
-
     if (layoutState.running) rafId = requestAnimationFrame(runLayoutChunk);
   }
 
@@ -451,13 +460,45 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
   function ensureSigma() {
     if (sigmaInstance || !host) return;
     const empty = new Graph({ multi: false });
+    let hoveredNode: string | null = null;
+    const nodeReducer: NodeReducer = (node, data, _attrs) => {
+      const d = { ...data };
+      const graph = sigmaInstance?.getGraph();
+      if (hoveredNode && graph) {
+        if (node === hoveredNode || graph.hasEdge(node, hoveredNode) || graph.hasEdge(hoveredNode, node)) {
+          d.zIndex = 1;
+        } else {
+          d.color = toRgba(String(d.color ?? "#888"), 0.12);
+          d.zIndex = 0;
+          d.label = "";
+        }
+      }
+      return d;
+    };
+    const edgeReducer: EdgeReducer = (edge, data, _attrs) => {
+      const d = { ...data };
+      d.color = toRgba(String(d.color ?? "#888"), 0.45);
+      const graph = sigmaInstance?.getGraph();
+      if (hoveredNode && graph) {
+        const [source, target] = graph.extremities(edge);
+        if (source === hoveredNode || target === hoveredNode) {
+          d.zIndex = 1;
+        } else {
+          d.color = toRgba(String(d.color), 0.08);
+          d.zIndex = 0;
+        }
+      }
+      return d;
+    };
     const s = new Sigma(empty, host, {
       primitives: { nodes: { shapes: [sdfCircle()] } },
+      nodeReducer,
+      edgeReducer,
       styles: {
-        nodes: [{ color: { attribute: "color" }, size: { attribute: "size" } }],
-        edges: [{ color: { attribute: "color" } }],
+        nodes: { size: { attribute: "size" }, color: { attribute: "color" } },
+        edges: { size: { attribute: "weight" }, color: { attribute: "color" } },
       },
-      settings: { allowInvalidContainer: true, itemSizesReference: "screen" },
+      settings: { allowInvalidContainer: true, itemSizesReference: "positions", autoRescale: false },
     });
     sigmaInstance = s;
     (window as any).__sigma = s;
@@ -466,9 +507,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     if (host) {
       grid = createGridOverlay(host, {
         getSigma: () => sigmaInstance,
-        getGraph: () => uiState.currentGraph,
-        getShow: () => uiState.showGrid || uiState.enforceBounds,
-        getBounds: () => (uiState.enforceBounds ? { maxX: uiState.boundsMaxX, maxY: uiState.boundsMaxY } : null),
+        getShow: () => uiState.showGrid,
       });
     }
 
@@ -478,7 +517,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     if (typeof ResizeObserver !== "undefined" && host) {
       containerObserver = new ResizeObserver(() => {
         if (!sigmaInstance) return;
-        sigmaInstance.refresh({ skipIndexation: true });
+        sigmaInstance.refresh();
         grid?.draw();
         resizeTrailCanvas();
       });
@@ -488,61 +527,36 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     s.getCamera().addListener("updated", () => {
       grid?.draw();
       if (untrack(() => showTrails)) drawTrails();
-      if (!suppressCameraUpdate && untrack(() => uiState.autoFit)) uiState.autoFit = false;
     });
 
-    s.setSetting("nodeReducer", (node, data) => {
-      const d = { ...data } as Record<string, unknown>;
-      if (focusSet.size > 0) {
-        if (focusSet.has(node)) {
-          d.zIndex = 1;
-        } else {
-          d.color = toRgba(String(d.color ?? "#888"), 0.12);
-          d.zIndex = 0;
-          d.label = "";
-        }
-      }
-      return d as never;
-    });
-
-    s.setSetting("edgeReducer", (edge, data) => {
-      const d = { ...data } as Record<string, unknown>;
-      if (focusSet.size > 0 && uiState.currentGraph) {
-        const src = uiState.currentGraph.source(edge);
-        const tgt = uiState.currentGraph.target(edge);
-        if (focusSet.has(src) && focusSet.has(tgt)) {
-          d.zIndex = 1;
-        } else {
-          if (typeof d.color === "string") d.color = toRgba(d.color, 0.08);
-          d.zIndex = 0;
-        }
-      }
-      return d as never;
-    });
+    const mouseCaptor = s.getMouseCaptor();
+    let panning = false;
+    mouseCaptor.on("wheel", () => setAutoFit(false));
+    mouseCaptor.on("mousedown", () => { panning = true; });
+    mouseCaptor.on("mousemove", () => { if (panning) setAutoFit(false); });
+    mouseCaptor.on("mouseup", () => { panning = false; });
 
     s.on("enterNode", ({ node }: { node: string }) => {
+      hoveredNode = node;
       const nb = new Set<string>([node]);
       uiState.currentGraph?.forEachNeighbor(node, (n) => nb.add(n));
       focusSet = nb;
-      s.refresh({ skipIndexation: true });
+        s.refresh();
     });
 
     s.on("leaveNode", () => {
+      hoveredNode = null;
       focusSet.clear();
-      s.refresh({ skipIndexation: true });
+      s.refresh();
     });
 
     s.on("clickNode", ({ node }: { node: string }) => {
       // Handle click if needed
     });
 
-    s.on("clickStage", () => {
+      s.on("clickStage", () => {
       focusSet.clear();
-      s.refresh({ skipIndexation: true });
-      if (uiState.autoFit) {
-        fitAll(s, uiState.currentGraph!, { animate: true });
-        uiState.autoFit = false;
-      }
+      s.refresh();
     });
   }
 
@@ -568,47 +582,20 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     }
   }
 
-  function freezeGridBBox() {
-    if (!sigmaInstance || !uiState.currentGraph || uiState.currentGraph.order === 0) return;
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    uiState.currentGraph.forEachNode((_id, a) => {
-      const na = a as { x: number; y: number };
-      if (na.x < minX) minX = na.x;
-      if (na.x > maxX) maxX = na.x;
-      if (na.y < minY) minY = na.y;
-      if (na.y > maxY) maxY = na.y;
-    });
-    sigmaInstance.setCustomBBox({ x: [minX, maxX], y: [minY, maxY] });
-  }
-
   function fitCamera(animate = true) {
-    if (!sigmaInstance || !uiState.currentGraph) return;
-    const graph = uiState.currentGraph;
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    graph.forEachNode((_, attr) => {
-      if (attr.x < minX) minX = attr.x;
-      if (attr.x > maxX) maxX = attr.x;
-      if (attr.y < minY) minY = attr.y;
-      if (attr.y > maxY) maxY = attr.y;
-    });
-    if (!isFinite(minX)) return; // no nodes
-    const graphW = maxX - minX;
-    const graphH = maxY - minY;
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    const dims = sigmaInstance.getDimensions();
-    const padding = 20;
-    const availW = dims.width - 2 * padding;
-    const availH = dims.height - 2 * padding;
-    const ratioW = graphW > 0 ? availW / graphW : Infinity;
-    const ratioH = graphH > 0 ? availH / graphH : Infinity;
-    const ratio = Math.min(ratioW, ratioH);
-    sigmaInstance.getCamera().animate({ x: centerX, y: centerY, ratio, duration: animate ? 400 : 0 });
+    if (!sigmaInstance) return;
+    const graph = sigmaInstance.getGraph();
+    void fitViewportToNodes(sigmaInstance, graph.nodes(), { animate });
   }
 
-  function fitAll(s: Sigma, g: Graph, opts: { animate: boolean }) {
-    const state = getCameraStateToFitViewportToNodes(s, g, { padding: 20 });
-    s.getCamera().animate({ ...state, duration: opts.animate ? 400 : 0 });
+  function setAutoFitEnabled(enabled: boolean) {
+    setAutoFit(enabled);
+    if (enabled) fitCamera(true);
+  }
+
+  function setGridEnabled(enabled: boolean) {
+    setShowGrid(enabled);
+    requestAnimationFrame(() => grid?.draw());
   }
 
   function clearTrails() {
@@ -647,6 +634,8 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
   }
 
   function toRgba(hex: string, alpha: number): string {
+    const rgb = hex.match(/^rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+    if (rgb) return `rgba(${rgb[1]},${rgb[2]},${rgb[3]},${alpha})`;
     const h = hex.replace("#", "");
     const r = parseInt(h.slice(0, 2), 16);
     const g = parseInt(h.slice(2, 4), 16);
@@ -689,20 +678,24 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
               onChange={(key, value) => {
                 if (optimizerState.autoTune) {
                   optimizer.setIncumbentParam(key, value);
+                } else {
+                  fa2Settings = { ...fa2Settings, [key]: value };
+                  layoutController?.updateSettings(fa2Settings);
+                  previewParams = null;
+                  if (layoutState.running) attachPreviewGraph();
                 }
               }}
               onLockToggle={toggleLock}
               onReset={() => {
-                optimizer.setIncumbentParam("gravity", 1);
-                optimizer.setIncumbentParam("slowDown", 1);
-                optimizer.setIncumbentParam("scalingRatio", 10);
-                optimizer.setIncumbentParam("barnesHutTheta", 0.5);
-                optimizer.setIncumbentParam("edgeWeightInfluence", 1);
-                optimizer.setIncumbentParam("strongGravityMode", false);
-                optimizer.setIncumbentParam("barnesHutOptimize", true);
-                optimizer.setIncumbentParam("outboundAttractionDistribution", false);
-                optimizer.setIncumbentParam("linLogMode", false);
-                optimizer.setIncumbentParam("adjustSizes", false);
+                fa2Settings = { ...DEFAULT_FA2_SETTINGS };
+                layoutController?.updateSettings(fa2Settings);
+                previewParams = null;
+                if (layoutState.running) attachPreviewGraph();
+                if (optimizerState.autoTune) {
+                  for (const [key, value] of Object.entries(DEFAULT_FA2_SETTINGS)) {
+                    optimizer.setIncumbentParam(key as keyof FA2Params, value);
+                  }
+                }
                 setLockedParams(new Set());
                 if (optimizerState.autoTune && optimizer.isCalibrated()) {
                   optimizer.retarget({ ...getCurrentFA2Settings() }, optimizerState.lockedParams, CONTEXT_DIM);
@@ -710,34 +703,15 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
               }}
             />
 
-            <fieldset class="fieldset border border-base-300 rounded-box p-2">
-                <legend class="fieldset-legend text-xs">Bounds · dashed = clamp box</legend>
-                <div class="flex flex-col gap-1.5">
-                  <label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer" title="Clamp every node to 0.5 ± half-width on each axis each layout tick">
-                    <input type="checkbox" bind:checked={uiState.enforceBounds} class="checkbox checkbox-xs" />
-                    Clamp to box
-                  </label>
-                  <label class="flex items-center gap-2 text-xs font-mono" title="Half-width — nodes clamped to 0.5 ± this">
-                    <span class="w-14 shrink-0 opacity-70">Half-w</span>
-                    <input type="range" min="0.05" max="0.5" step="0.05" bind:value={uiState.boundsMaxX} class="range range-xs flex-1" disabled={!uiState.enforceBounds} />
-                    <span class="w-10 text-right shrink-0">{uiState.boundsMaxX}</span>
-                  </label>
-                  <label class="flex items-center gap-2 text-xs font-mono" title="Half-height — nodes clamped to 0.5 ± this">
-                    <span class="w-14 shrink-0 opacity-70">Half-h</span>
-                    <input type="range" min="0.05" max="0.5" step="0.05" bind:value={uiState.boundsMaxY} class="range range-xs flex-1" disabled={!uiState.enforceBounds} />
-                    <span class="w-10 text-right shrink-0">{uiState.boundsMaxY}</span>
-                  </label>
-                </div>
-              </fieldset>
-
               <fieldset class="fieldset border border-base-300 rounded-box p-2">
                 <legend class="fieldset-legend text-xs">Layout</legend>
                 <div class="flex flex-col gap-1.5">
-                  <button class="btn btn-sm btn-block" disabled={layoutState.running || !uiState.graphReady} onclick={startLayoutFn}>
-                    Start Layout
-                  </button>
-                  <button class="btn btn-sm btn-warning btn-block" disabled={!layoutState.running} onclick={stopLayoutFn}>
-                    Stop Layout
+                  <button
+                    class="btn btn-sm btn-block {layoutState.running ? 'btn-warning' : ''}"
+                    disabled={!layoutState.running && !uiState.graphReady}
+                    onclick={() => layoutState.running ? stopLayoutFn() : startLayoutFn()}
+                  >
+                    {layoutState.running ? 'Stop Layout' : 'Start Layout'}
                   </button>
                   <button class="btn btn-xs btn-ghost btn-block" onclick={resetAll}>Reset</button>
                 </div>
@@ -750,7 +724,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
               <div class="flex items-center gap-2 text-xs font-mono">
                 <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Total number of nodes">
                   <span class="w-24">Nodes</span>
-                  <input type="range" min="1" max="100" step="1" bind:value={uiState.nodeCount} class="range range-xs flex-1" />
+                  <input type="range" min="1" max="1000" step="1" bind:value={uiState.nodeCount} class="range range-xs flex-1" />
                   <span class="w-10 text-right shrink-0">{uiState.nodeCount}</span>
                 </label>
               </div>
@@ -769,6 +743,13 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
                 </label>
               </div>
               <div class="flex items-center gap-2 text-xs font-mono">
+                <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Weight applied to generated edges and their visual thickness">
+                  <span class="w-24">Edge Weight</span>
+                  <input type="range" min="0.25" max="5" step="0.25" bind:value={uiState.edgeWeight} class="range range-xs flex-1" />
+                  <span class="w-10 text-right shrink-0">{uiState.edgeWeight.toFixed(2)}</span>
+                </label>
+              </div>
+              <div class="flex items-center gap-2 text-xs font-mono">
                 <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Deterministic seed — the graph is identical for the same seed and settings">
                   <span class="w-24 shrink-0">Seed</span>
                   <input type="number" min="0" max="2147483647" step="1" bind:value={uiState.fixedSeed} class="input input-xs input-bordered flex-1" />
@@ -783,7 +764,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
 
               <div class="mt-2 flex flex-col gap-1">
                 <div class="text-[10px] uppercase tracking-wide opacity-60">Est. edges: {estEdgeCount} {estEdgeCount > MAX_EDGES ? '⚠️' : ''} / {MAX_EDGES} max</div>
-                <div class="text-[10px] uppercase tracking-wide opacity-60">Clamped: {clampNodeCount({ nodeCount: uiState.nodeCount, clusterCount: uiState.clusterCount, degreeRatio: uiState.degreeRatio, seed: uiState.fixedSeed }).nodeCount !== uiState.nodeCount ? 'yes' : 'no'}</div>
+                <div class="text-[10px] uppercase tracking-wide opacity-60">Clamped: {clampNodeCount({ nodeCount: uiState.nodeCount, clusterCount: uiState.clusterCount, degreeRatio: uiState.degreeRatio, edgeWeight: uiState.edgeWeight, seed: uiState.fixedSeed }).nodeCount !== uiState.nodeCount ? 'yes' : 'no'}</div>
                 <div class="text-[10px] uppercase tracking-wide opacity-60">Regenerates automatically when settings change</div>
               </div>
             </div>
@@ -795,6 +776,16 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
     <div class="flex-1 relative min-h-[420px] min-w-[480px]" bind:this={host}>
       <canvas class="absolute inset-0" bind:this={trailCanvas}></canvas>
       <DebugOverlay visible={debugOverlayVisible} stats={layoutState.tickStats} />
+      <div class="absolute bottom-3 right-3 z-10 flex flex-col gap-1 rounded bg-base-200/80 p-2 text-xs font-mono backdrop-blur">
+        <label class="flex items-center gap-1.5 cursor-pointer" title="Keep the camera fitted to all graph nodes until you pan or zoom">
+          <input type="checkbox" checked={uiState.autoFit} onchange={(event) => setAutoFitEnabled(event.currentTarget.checked)} class="checkbox checkbox-xs" />
+          Auto-fit
+        </label>
+        <label class="flex items-center gap-1.5 cursor-pointer" title="Show the coordinate reference grid behind the graph">
+          <input type="checkbox" checked={uiState.showGrid} onchange={(event) => setGridEnabled(event.currentTarget.checked)} class="checkbox checkbox-xs" />
+          Grid
+        </label>
+      </div>
     </div>
   </div>
 

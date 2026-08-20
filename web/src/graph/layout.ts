@@ -14,9 +14,10 @@ const STATS_POLL_MS = 50;
 const LAYOUT_SETTINGS = {
 	outboundAttractionDistribution: true,
 	edgeWeightInfluence: 1,
-	scalingRatio: 10,
+	scalingRatio: 1,
+	adjustSizes: true,
 	strongGravityMode: true,
-	gravity: 0.05,
+	gravity: 0.1,
 	slowDown: 10,
 	barnesHutOptimize: true,
 	barnesHutTheta: 0.5,

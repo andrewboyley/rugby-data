@@ -10,9 +10,6 @@ import { assignUnitCircle } from "./graph-generator";
 export type LayoutControllerOptions = {
   graph: Graph;
   settings: FA2Params;
-  enforceBounds: boolean;
-  boundsMaxX: number;
-  boundsMaxY: number;
   optimizer?: { featureView: (stat: LayoutTickStats) => ReturnType<FeatureNormalizer["normalize"]> };
 };
 
@@ -25,18 +22,12 @@ export type LayoutStepResult = {
 export class LayoutController {
   private graph: Graph;
   private settings: FA2Params;
-  private enforceBounds: boolean;
-  private boundsMaxX: number;
-  private boundsMaxY: number;
   private optimizer?: { featureView: (stat: LayoutTickStats) => ReturnType<FeatureNormalizer["normalize"]> };
   private previousPositions: Map<string, { x: number; y: number }> = new Map();
 
   constructor(opts: LayoutControllerOptions) {
     this.graph = opts.graph;
     this.settings = opts.settings;
-    this.enforceBounds = opts.enforceBounds;
-    this.boundsMaxX = opts.boundsMaxX;
-    this.boundsMaxY = opts.boundsMaxY;
     this.optimizer = opts.optimizer;
   }
 
@@ -44,10 +35,8 @@ export class LayoutController {
     this.settings = settings;
   }
 
-  updateBounds(enforce: boolean, maxX: number, maxY: number) {
-    this.enforceBounds = enforce;
-    this.boundsMaxX = maxX;
-    this.boundsMaxY = maxY;
+  setGraph(graph: Graph) {
+    this.graph = graph;
   }
 
   setOptimizer(optimizer: { featureView: (stat: LayoutTickStats) => ReturnType<FeatureNormalizer["normalize"]> }) {
@@ -61,39 +50,25 @@ export class LayoutController {
 
   step(): LayoutStepResult {
     const prev = this.previousPositions;
-    const options: ForceAtlas2SynchronousLayoutParameters = { iterations: 1, settings: { ...this.settings } };
+    const options: ForceAtlas2SynchronousLayoutParameters = { iterations: 2, settings: { ...this.settings, scalingRatio: 1, adjustSizes: true } };
     runForceAtlas2(this.graph, options);
     const badNodes = sanitizePositions(this.graph, prev);
     const stat = computeTickStats(this.graph, prev);
     if (stat && this.optimizer) {
       this.optimizer.featureView(stat);
     }
-    this.applyClampBounds();
     this.previousPositions = this.savePositions();
     return { stat, positions: this.previousPositions, badNodes };
   }
 
   stepWithParams(params: FA2Params): LayoutStepResult {
     const prev = this.previousPositions;
-    const options: ForceAtlas2SynchronousLayoutParameters = { iterations: 1, settings: { ...params } };
+    const options: ForceAtlas2SynchronousLayoutParameters = { iterations: 3, settings: { ...params, scalingRatio: 1, adjustSizes: true } };
     runForceAtlas2(this.graph, options);
     const badNodes = sanitizePositions(this.graph, prev);
     const stat = computeTickStats(this.graph, prev);
-    this.applyClampBounds();
     this.previousPositions = this.savePositions();
     return { stat, positions: this.previousPositions, badNodes };
-  }
-
-  private applyClampBounds() {
-    if (!this.enforceBounds) return;
-    this.graph.forEachNode((_node: string, attrs: Record<string, unknown>) => {
-      const x = attrs.x as number;
-      const y = attrs.y as number;
-      if (x > 0.5 + this.boundsMaxX) attrs.x = 0.5 + this.boundsMaxX;
-      else if (x < 0.5 - this.boundsMaxX) attrs.x = 0.5 - this.boundsMaxX;
-      if (y > 0.5 + this.boundsMaxY) attrs.y = 0.5 + this.boundsMaxY;
-      else if (y < 0.5 - this.boundsMaxY) attrs.y = 0.5 - this.boundsMaxY;
-    });
   }
 
   private savePositions(): Map<string, { x: number; y: number }> {
@@ -111,4 +86,5 @@ export class LayoutController {
   setPreviousPositions(positions: Map<string, { x: number; y: number }>) {
     this.previousPositions = positions;
   }
+
 }

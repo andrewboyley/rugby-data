@@ -221,13 +221,13 @@ private refreshRaf: number | null = null;
     if (!this.graph) return;
     this.graph.setAttribute("edgeAlphaMin", lo);
     this.graph.setAttribute("edgeAlphaMax", hi);
-    if (this.sigma) this.sigma.refresh({ skipIndexation: true });
+    if (this.sigma) this.sigma.refresh();
   }
 
   public setEdgeColorMode(mode: string): void {
     if (!this.graph) return;
     this.graph.setAttribute("edgeColorMode", mode);
-    if (this.sigma) this.sigma.refresh({ skipIndexation: true });
+    if (this.sigma) this.sigma.refresh();
   }
 
   public selectEdge(sourceId: number, targetId: number): void {
@@ -256,12 +256,12 @@ private refreshRaf: number | null = null;
         }),
       );
     });
-    this.sigma.refresh({ skipIndexation: true });
+    this.sigma.refresh();
   }
 
   /** Refresh sigma render (for alpha/edge mode changes that reducers pick up). */
   public refresh(): void {
-    this.sigma?.refresh({ skipIndexation: true });
+    this.sigma?.refresh();
   }
 
   /** Toggle metaballs visibility. */
@@ -448,7 +448,7 @@ if (this.refreshRaf != null) cancelAnimationFrame(this.refreshRaf);
     if (this.refreshRaf != null) return;
     this.refreshRaf = requestAnimationFrame(() => {
       this.refreshRaf = null;
-      if (this.sigma) this.sigma.refresh({ skipIndexation: true });
+      if (this.sigma) this.sigma.refresh();
     });
   }
 
@@ -550,7 +550,6 @@ private createSigma(): Sigma {
     // behind sigma's render canvas. Shared with the test page via grid.ts.
     this.grid = createGridOverlay(this.opts.host, {
       getSigma: () => this.sigma,
-      getGraph: () => this.graph,
       getShow: () => this.showGrid,
     });
     s.getCamera().addListener("updated", () => this.grid?.draw());

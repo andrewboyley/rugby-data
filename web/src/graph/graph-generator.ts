@@ -1,11 +1,11 @@
 import Graph from "graphology";
-import { circular } from "graphology-layout";
 import { CLUSTER_COLORS, mixHexColors } from "./colors";
 
 export interface GraphSpec {
   nodeCount: number;
   clusterCount: number;
   degreeRatio: number;
+  edgeWeight: number;
   seed: number;
   onlyWithinCluster?: boolean;
 }
@@ -17,14 +17,32 @@ export interface GraphGenResult {
 }
 
 const MAX_EDGES = 15000;
+const NODE_SIZE_PER_DEGREE = 0.5;
+const MIN_NODE_SIZE = 2;
+const MAX_NODE_SIZE = 5;
 
-// Graphology circular layout options producing a unit circle inscribed in the
-// normalized [0, 1] square (sigma v4 "framedGraph" space): scale 0.5 gives a
-// radius of 0.5 and center 1.5 shifts the offset so positions land in [0, 1].
-export const UNIT_CIRCLE_OPTIONS = { scale: 0.5, center: 1.5 } as const;
+export const UNIT_CIRCLE_OPTIONS = { scale: 100, center: 0 } as const;
 
 export function assignUnitCircle(graph: Graph): void {
-  circular.assign(graph, UNIT_CIRCLE_OPTIONS);
+  const groups = new Map<string, string[]>();
+  graph.forEachNode((node, attrs) => {
+    const group = groups.get(String(attrs.color)) ?? [];
+    group.push(node);
+    groups.set(String(attrs.color), group);
+  });
+  const ordered: string[] = [];
+  const groupList = [...groups.values()];
+  const maxGroupSize = Math.max(...groupList.map((group) => group.length), 0);
+  for (let index = 0; index < maxGroupSize; index++) {
+    for (const group of groupList) {
+      if (group[index]) ordered.push(group[index]);
+    }
+  }
+  ordered.forEach((node, index) => {
+    const angle = (index / ordered.length) * Math.PI * 2;
+    graph.setNodeAttribute(node, "x", UNIT_CIRCLE_OPTIONS.center + UNIT_CIRCLE_OPTIONS.scale * Math.cos(angle));
+    graph.setNodeAttribute(node, "y", UNIT_CIRCLE_OPTIONS.center + UNIT_CIRCLE_OPTIONS.scale * Math.sin(angle));
+  });
 }
 
 function mulberry32(a: number) {
@@ -42,18 +60,18 @@ function estimateEdges(spec: GraphSpec): number {
 }
 
 function clampNodeCount(spec: GraphSpec): GraphSpec {
-  let { nodeCount, clusterCount, degreeRatio, seed } = spec;
-  let est = estimateEdges({ nodeCount, clusterCount, degreeRatio, seed });
+  let { nodeCount, clusterCount, degreeRatio, edgeWeight, seed } = spec;
+  let est = estimateEdges({ nodeCount, clusterCount, degreeRatio, edgeWeight, seed });
   while (est > MAX_EDGES && nodeCount > 1) {
     nodeCount = Math.max(1, nodeCount - 10);
-    est = estimateEdges({ nodeCount, clusterCount, degreeRatio, seed });
+    est = estimateEdges({ nodeCount, clusterCount, degreeRatio, edgeWeight, seed });
   }
-  return { nodeCount, clusterCount, degreeRatio, seed };
+  return { nodeCount, clusterCount, degreeRatio, edgeWeight, seed };
 }
 
 export function generateGraph(spec: GraphSpec): GraphGenResult {
   const clamped = clampNodeCount(spec);
-  const { nodeCount, clusterCount, degreeRatio, seed } = clamped;
+  const { nodeCount, clusterCount, degreeRatio, seed, edgeWeight } = clamped;
   const onlyWithinCluster = spec.onlyWithinCluster ?? false;
   const rand = mulberry32(seed);
 
@@ -77,26 +95,36 @@ export function generateGraph(spec: GraphSpec): GraphGenResult {
     return mixHexColors(CLUSTER_COLORS[cs % CLUSTER_COLORS.length], CLUSTER_COLORS[ct % CLUSTER_COLORS.length]);
   }
 
-for (let i = 0; i < nodeCount; i++) {
+  function edgeWeightValue(): number {
+    // Seeded variation keeps edge thickness deterministic for the same graph settings.
+    return edgeWeight * (0.5 + rand());
+  }
+
+  for (let i = 0; i < nodeCount; i++) {
     graph.addNode(i, {
       x: rand(),
       y: rand(),
-      size: 0.015,
+      size: 0.02,
       color: clusterColor(i),
     });
   }
 
-  const targetEdges = Math.round((nodeCount * nodeCount * degreeRatio) / 2);
+  const targetEdges = Math.max(nodeCount - clusterCount, Math.round((nodeCount * nodeCount * degreeRatio) / 2));
   let edgesAdded = 0;
 
   for (let c = 0; c < clusterCount; c++) {
     const start = c * clusterSize;
     const end = Math.min(start + clusterSize, nodeCount);
+    for (let node = start + 1; node < end; node++) {
+      graph.addEdge(node - 1, node, { color: clusterColor(node - 1), weight: edgeWeightValue() });
+      edgesAdded++;
+    }
     for (let i = start; i < end; i++) {
       for (let j = i + 1; j < end; j++) {
         if (edgesAdded >= targetEdges) break;
+        if (graph.hasEdge(i, j)) continue;
         if (rand() < degreeRatio * 2) {
-          graph.addEdge(i, j, { color: clusterColor(i) });
+          graph.addEdge(i, j, { color: clusterColor(i), weight: edgeWeightValue() });
           edgesAdded++;
         }
       }
@@ -109,31 +137,32 @@ for (let i = 0; i < nodeCount; i++) {
         if (edgesAdded >= targetEdges) break;
         if (graph.hasEdge(i, j)) continue;
         if (rand() < degreeRatio * 0.1) {
-          graph.addEdge(i, j, { color: edgeColor(i, j) });
+           graph.addEdge(i, j, { color: edgeColor(i, j), weight: edgeWeightValue() });
           edgesAdded++;
         }
       }
     }
   }
 
-  // Set node sizes based on degree (in pixels, since itemSizesReference: "screen")
-  const minSize = 5;
-  const maxSize = 15;
-  let minDegree = Infinity;
-  let maxDegree = -Infinity;
+  // Guarantee that sparse generation never leaves a node isolated.
+  for (let i = 0; i < nodeCount; i++) {
+    if (graph.degree(i) > 0 || nodeCount < 2) continue;
+    let target = i === nodeCount - 1 ? 0 : i + 1;
+    if (onlyWithinCluster) {
+      const clusterStart = clusterOf(i) * clusterSize;
+      target = clusterStart === i ? clusterStart + 1 : clusterStart;
+      if (target >= nodeCount || clusterOf(target) !== clusterOf(i)) continue;
+    }
+    if (graph.hasEdge(i, target)) continue;
+    graph.addEdge(i, target, { color: edgeColor(i, target), weight: edgeWeightValue() });
+  }
+
   graph.forEachNode((id) => {
-    const deg = graph.degree(id);
-    if (deg < minDegree) minDegree = deg;
-    if (deg > maxDegree) maxDegree = deg;
-  });
-  const degreeSpan = maxDegree - minDegree || 1;
-  graph.forEachNode((id) => {
-    const deg = graph.degree(id);
-    const norm = (deg - minDegree) / degreeSpan;
-    graph.setNodeAttribute(id, "size", minSize + norm * (maxSize - minSize));
+    graph.setNodeAttribute(id, "size", Math.min(MAX_NODE_SIZE, Math.max(MIN_NODE_SIZE, graph.degree(id) * NODE_SIZE_PER_DEGREE)));
   });
 
   assignUnitCircle(graph);
+
   return {
     graph,
     estimatedEdges: estimateEdges(clamped),

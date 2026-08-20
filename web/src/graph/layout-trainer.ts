@@ -100,7 +100,7 @@ this.episodeRewards = [];
           this.startNewEpisode();
         }
 
-        const params = this.getCurrentEpisodeParams() ?? this.currentSettings ?? { gravity: 1, slowDown: 1, scalingRatio: 10, strongGravityMode: false, barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1, outboundAttractionDistribution: false, linLogMode: false, adjustSizes: false } as FA2Params;
+        const params = this.getCurrentEpisodeParams() ?? this.currentSettings ?? { gravity: 0.1, slowDown: 1, scalingRatio: 1, strongGravityMode: true, barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1, outboundAttractionDistribution: true, linLogMode: false, adjustSizes: true } as FA2Params;
         this.currentSettings = params;
         const result = this.controller.stepWithParams(params);
 
@@ -161,7 +161,7 @@ this.episodeRewards = [];
 
   private startNewEpisode() {
     const context = this.getEpisodeContext();
-    const params = this.optimizer.chooseArm(context, this.currentSettings ?? { gravity: 1, slowDown: 1, scalingRatio: 10, strongGravityMode: false, barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1, outboundAttractionDistribution: false, linLogMode: false, adjustSizes: false } as FA2Params);
+    const params = this.optimizer.chooseArm(context, this.currentSettings ?? { gravity: 0.1, slowDown: 1, scalingRatio: 1, strongGravityMode: true, barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1, outboundAttractionDistribution: true, linLogMode: false, adjustSizes: true } as FA2Params);
     this.setCurrentEpisodeParams(params);
     this.trainIterCount = this.getIterBudget();
     this.controller.resetToCircle();

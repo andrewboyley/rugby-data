@@ -231,20 +231,6 @@ export function sanitizePositions(graph: Graph, previousPositions: Map<string, {
   return bad;
 }
 
-export function clampBounds(
-  graph: Graph | null,
-  enforceBounds: boolean,
-  boundsMaxX: number,
-  boundsMaxY: number
-): void {
-  if (!enforceBounds || !graph) return;
-  graph.forEachNode((id: string, attrs: Record<string, unknown>) => {
-    const a = attrs as { x: number; y: number };
-    graph.setNodeAttribute(id, "x", Math.min(Math.max(a.x, 0.5 - boundsMaxX), 0.5 + boundsMaxX));
-    graph.setNodeAttribute(id, "y", Math.min(Math.max(a.y, 0.5 - boundsMaxY), 0.5 + boundsMaxY));
-  });
-}
-
 export function savePositions(graph: Graph | null): Map<string, { x: number; y: number }> {
   const map = new Map<string, { x: number; y: number }>();
   if (!graph) return map;

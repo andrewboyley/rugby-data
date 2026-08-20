@@ -10,6 +10,7 @@ export interface UIState {
   nodeCount: number;
   clusterCount: number;
   degreeRatio: number;
+  edgeWeight: number;
   fixedSeed: number;
   onlyWithinCluster: boolean;
 
@@ -22,9 +23,6 @@ export interface UIState {
   showGrid: boolean;
   showTrails: boolean;
   trailOpacity: number;
-  enforceBounds: boolean;
-  boundsMaxX: number;
-  boundsMaxY: number;
 
   // Persistence
   storageKey: string;
@@ -37,6 +35,7 @@ const initialState: UIState = {
   nodeCount: 46,
   clusterCount: 2,
   degreeRatio: 0.3,
+  edgeWeight: 2,
   fixedSeed: 42,
   onlyWithinCluster: true,
   currentGraph: null,
@@ -45,9 +44,6 @@ const initialState: UIState = {
   showGrid: true,
   showTrails: false,
   trailOpacity: 0.55,
-  enforceBounds: true,
-  boundsMaxX: 0.4,
-  boundsMaxY: 0.3,
   storageKey: "rugby-fa2-settings",
 };
 
@@ -60,6 +56,7 @@ export function resetUIState() {
   uiState.nodeCount = 200;
   uiState.clusterCount = 10;
   uiState.degreeRatio = 0.15;
+  uiState.edgeWeight = 2;
   uiState.fixedSeed = 42;
   uiState.onlyWithinCluster = false;
   uiState.currentGraph = null;
@@ -68,9 +65,6 @@ export function resetUIState() {
   uiState.showGrid = true;
   uiState.showTrails = false;
   uiState.trailOpacity = 0.55;
-  uiState.enforceBounds = true;
-  uiState.boundsMaxX = 0.4;
-  uiState.boundsMaxY = 0.3;
 }
 
 export function setGraph(graph: Graph | null) {
@@ -102,6 +96,10 @@ export function setDegreeRatio(value: number) {
   uiState.degreeRatio = value;
 }
 
+export function setEdgeWeight(value: number) {
+  uiState.edgeWeight = value;
+}
+
 export function setFixedSeed(value: number) {
   uiState.fixedSeed = value;
 }
@@ -124,16 +122,4 @@ export function setShowTrails(value: boolean) {
 
 export function setTrailOpacity(value: number) {
   uiState.trailOpacity = value;
-}
-
-export function setEnforceBounds(value: boolean) {
-  uiState.enforceBounds = value;
-}
-
-export function setBoundsMaxX(value: number) {
-  uiState.boundsMaxX = value;
-}
-
-export function setBoundsMaxY(value: number) {
-  uiState.boundsMaxY = value;
 }

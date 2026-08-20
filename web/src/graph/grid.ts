@@ -1,25 +1,16 @@
 // Shared reference-grid overlay used by both the main graph view
 // (GraphController) and the test page (GraphologyTestPage). Draws grid lines
 // aligned to graph coordinates (so they pan/zoom with the camera) plus a
-// coordinate label on each line, and an optional clamp/bounds box.
+// coordinate label on each line.
 //
 // The overlay owns its own <canvas>, inserted as the first child of the host so
 // it sits behind sigma's render canvas (the grid reads as a background layer).
 
 import type Sigma from "sigma";
-import type Graph from "graphology";
-
-export interface GridBounds {
-  maxX: number;
-  maxY: number;
-}
 
 export interface GridOverlayOpts {
   getSigma: () => Sigma | null;
-  getGraph: () => Graph | null;
   getShow: () => boolean;
-  /** Optional clamp/bounds box to outline (e.g. test page's enforceBounds). */
-  getBounds?: () => GridBounds | null;
 }
 
 export interface GridOverlay {
@@ -38,8 +29,7 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const sigma = opts.getSigma();
-    const graph = opts.getGraph();
-    if (!opts.getShow() || !sigma || !graph || graph.order === 0) {
+    if (!opts.getShow() || !sigma) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       return;
     }
@@ -104,16 +94,6 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
       }
     }
 
-    const bounds = opts.getBounds?.();
-    if (bounds) {
-      // Bounds box is centered on the unit graph center (0.5, 0.5).
-      const p1 = sigma.graphToViewport({ x: 0.5 - bounds.maxX, y: 0.5 - bounds.maxY });
-      const p2 = sigma.graphToViewport({ x: 0.5 + bounds.maxX, y: 0.5 + bounds.maxY });
-      ctx.setLineDash([5, 5]);
-      ctx.strokeStyle = "rgba(255,0,0,0.4)";
-      ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);
-      ctx.setLineDash([]);
-    }
   }
 
   return {

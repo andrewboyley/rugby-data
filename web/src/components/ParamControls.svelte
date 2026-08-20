@@ -18,7 +18,6 @@
     // Numeric params (sliders)
     { key: "gravity", label: "Gravity", min: 0.01, max: 10, step: 0.01, type: "slider" as const, title: "Attraction to center; higher = stronger pull to center" },
     { key: "slowDown", label: "SlowDown", min: 0.1, max: 50, step: 0.1, type: "slider" as const, title: "Integration step damping; higher = slower, more stable" },
-    { key: "scalingRatio", label: "Scaling", min: 1, max: 100, step: 1, type: "slider" as const, title: "Scaling factor for force magnitude; higher = more spread" },
     { key: "barnesHutTheta", label: "BH Theta", min: 0.1, max: 1, step: 0.05, type: "slider" as const, title: "Barnes-Hut approximation threshold; lower = more accurate, slower" },
     { key: "edgeWeightInfluence", label: "Edge Wt", min: 0, max: 5, step: 0.1, type: "slider" as const, title: "Influence of edge weight on attraction force" },
     // Boolean params (checkboxes)
@@ -26,7 +25,6 @@
     { key: "barnesHutOptimize", label: "BH Optimize", min: 0, max: 1, step: 1, type: "checkbox" as const, title: "Use Barnes-Hut quadtree approximation for repulsion" },
     { key: "outboundAttractionDistribution", label: "Outbound", min: 0, max: 1, step: 1, type: "checkbox" as const, title: "Distribute attraction force to outbound edges" },
     { key: "linLogMode", label: "LinLog", min: 0, max: 1, step: 1, type: "checkbox" as const, title: "Logarithmic attraction for high-degree nodes" },
-    { key: "adjustSizes", label: "Adjust Sizes", min: 0, max: 1, step: 1, type: "checkbox" as const, title: "Adjust node sizes based on degree" },
   ] as const;
 
   function fmt(v: number): string {
