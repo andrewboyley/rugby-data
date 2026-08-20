@@ -7,41 +7,67 @@ The dataset covers all international (national) teams. Match discovery
 iterates each team's events per year, so any competition a national team enters
 — across current or future leagues — is captured automatically.
 
-## Commands
+## Prerequisites
 
-Requires a virtual environment with the package installed:
+- [uv](https://docs.astral.sh/uv/) — Python package manager
+- [just](https://github.com/casey/just) — command runner for the recipes below
+- Node.js + npm — for the web viewer
+
+## Setup
 
 ```sh
-uv sync
-.venv/bin/rugby-composition-predictor dataset   # fetch & build data/dataset.json
-.venv/bin/rugby-composition-predictor graph      # build data/graph.json
+just setup          # uv sync + install web dependencies
 ```
 
-Restrict to a single team with `--team <id>` (e.g. `--team 5` for South
-Africa); omit it to fetch all international teams.
+Run `just --list` to see all available commands.
 
-Both commands are resumable and idempotent. Raw API responses are cached in
+## Build the dataset and graph
+
+```sh
+just dataset        # fetch all international teams -> data/dataset.json
+just graph          # build data/graph.json from the dataset
+```
+
+Restrict to a single team with `--team <id>` (e.g. `just dataset --team 5`
+for South Africa); omit it to fetch all international teams.
+
+Both steps are resumable and idempotent. Raw API responses are cached in
 `data/api_cache.json`, so re-runs are fast and do not hit the network for
 already-fetched events. If you delete `dataset.json` and want a full
 re-derive, pass `--reset`: it clears the processed-event markers and rebuilds
 from the cached raw responses (no re-download). To force a true re-download,
 delete `data/api_cache.json` as well.
 
+You can also run the Python package directly instead of via `just`:
+
+```sh
+.venv/bin/rugby-composition-predictor dataset
+.venv/bin/rugby-composition-predictor graph
+```
+
+## Run the viewer
+
+Build and preview the static viewer:
+
+```sh
+just serve           # builds dist/, previews on http://localhost:8787
+```
+
+For live development with hot reload, run the dev server (port 5173):
+
+```sh
+just dev-start       # start the Vite dev server
+just dev-status      # show status / logs
+just dev-stop        # stop it
+```
+
+The viewer reads the generated `data/graph.json` (and `data/dataset.json`)
+from the repository root.
+
 ## Visualisation
 
-A Svelte app in `web/` renders the graph. Build and serve it with Vite:
-
-```sh
-just serve                            # builds dist/, previews on localhost:8787
-# http://localhost:8787/
-```
-
-Or run the steps separately:
-
-```sh
-just web                              # npm ci && vite build -> dist/
-cd web && npm run preview             # serves dist/ + repo data/ on :8787
-```
+A Svelte app in `web/` renders the graph. Run it with `just serve` (or
+`just dev-start` for live reload — see above).
 
 Nodes are players (size = appearances, colour = modal jersey number), edges
 connect players who shared a match (width/opacity = co-occurrence count).
