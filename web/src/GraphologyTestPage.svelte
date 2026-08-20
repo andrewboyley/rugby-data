@@ -651,7 +651,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
         <button class="btn btn-sm btn-ghost ml-auto" onclick={(e) => { e.stopPropagation(); sidebarOpen = false; }} title="Collapse sidebar">‹</button>
       </div>
 
-      <div class="flex-1 overflow-y-auto p-3" style="min-height: 0;">
+<div class="flex-1 overflow-y-auto p-3" style="min-height: 0;">
         {#if uiState.settingsTab === 'fa2'}
           <div class="flex flex-col gap-2">
             <ParamControls
@@ -665,57 +665,25 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
                 }
               }}
               onLockToggle={toggleLock}
+              onReset={() => {
+                optimizer.setIncumbentParam("gravity", 1);
+                optimizer.setIncumbentParam("slowDown", 1);
+                optimizer.setIncumbentParam("scalingRatio", 10);
+                optimizer.setIncumbentParam("barnesHutTheta", 0.5);
+                optimizer.setIncumbentParam("edgeWeightInfluence", 1);
+                optimizer.setIncumbentParam("strongGravityMode", false);
+                optimizer.setIncumbentParam("barnesHutOptimize", true);
+                optimizer.setIncumbentParam("outboundAttractionDistribution", false);
+                optimizer.setIncumbentParam("linLogMode", false);
+                optimizer.setIncumbentParam("adjustSizes", false);
+                setLockedParams(new Set());
+                if (optimizerState.autoTune && optimizer.isCalibrated()) {
+                  optimizer.retarget({ ...getCurrentFA2Settings() }, optimizerState.lockedParams, CONTEXT_DIM);
+                }
+              }}
             />
 
-              <fieldset class="fieldset border border-base-300 rounded-box p-2">
-                <legend class="fieldset-legend text-xs flex items-center gap-1">
-                  Options
-                  <span class="badge badge-xs badge-ghost">🔒 = locked from optimizer</span>
-                </legend>
-                <div class="flex flex-col gap-1">
-                  {#each [
-                    { key: "strongGravityMode", label: "Strong Gravity", title: "Force all nodes toward center regardless of edges" },
-                    { key: "barnesHutOptimize", label: "BH Optimize", title: "Use Barnes-Hut quadtree approximation for repulsion" },
-                    { key: "outboundAttractionDistribution", label: "Outbound", title: "Distribute attraction force to outbound edges" },
-                    { key: "linLogMode", label: "LinLog", title: "Logarithmic attraction for high-degree nodes" },
-                    { key: "adjustSizes", label: "Adjust Sizes", title: "Adjust node sizes based on degree" },
-                  ] as item}
-                    <div class="flex items-center gap-1.5 text-xs font-mono cursor-pointer">
-                      <label class="flex items-center gap-1.5 flex-1 cursor-pointer" title={item.title}>
-                        <input type="checkbox" checked={getCurrentFA2Settings()[item.key] as boolean} class="checkbox checkbox-xs" disabled={optimizerState.autoTune && !optimizerState.lockedParams.has(item.key)} onchange={(e) => {
-                          if (!optimizerState.autoTune || optimizerState.lockedParams.has(item.key)) {
-                            if (optimizerState.autoTune) {
-                              optimizer.setIncumbentParam(item.key, e.currentTarget.checked);
-                            }
-                          }
-                        }} />
-                        {item.label}
-                      </label>
-                      <button type="button" class="btn btn-xs btn-ghost px-1 min-h-0 h-5 {optimizerState.lockedParams.has(item.key) ? 'text-warning' : 'text-base-content/30'}" onclick={() => handleLockToggle(item.key)} title="Lock from optimizer">{optimizerState.lockedParams.has(item.key) ? '🔒' : '🔓'}</button>
-                    </div>
-                  {/each}
-                </div>
-                <div class="flex gap-2 mt-2">
-                  <button class="btn btn-xs btn-ghost btn-block" onclick={() => {
-                    optimizer.setIncumbentParam("gravity", 1);
-                    optimizer.setIncumbentParam("slowDown", 1);
-                    optimizer.setIncumbentParam("scalingRatio", 10);
-                    optimizer.setIncumbentParam("barnesHutTheta", 0.5);
-                    optimizer.setIncumbentParam("edgeWeightInfluence", 1);
-                    optimizer.setIncumbentParam("strongGravityMode", false);
-                    optimizer.setIncumbentParam("barnesHutOptimize", true);
-                    optimizer.setIncumbentParam("outboundAttractionDistribution", false);
-                    optimizer.setIncumbentParam("linLogMode", false);
-                    optimizer.setIncumbentParam("adjustSizes", false);
-                    setLockedParams(new Set());
-                    if (optimizerState.autoTune && optimizer.isCalibrated()) {
-                      optimizer.retarget({ ...getCurrentFA2Settings() }, optimizerState.lockedParams, CONTEXT_DIM);
-                    }
-                  }}>Reset</button>
-                </div>
-              </fieldset>
-
-              <fieldset class="fieldset border border-base-300 rounded-box p-2">
+            <fieldset class="fieldset border border-base-300 rounded-box p-2">
                 <legend class="fieldset-legend text-xs">Bounds · dashed = clamp box</legend>
                 <div class="flex flex-col gap-1.5">
                   <label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer" title="Clamp every node to 0.5 ± half-width on each axis each layout tick">
