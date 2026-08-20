@@ -5,11 +5,11 @@
   import Sigma from "sigma";
   import { sdfCircle } from "sigma/rendering";
   import { getCameraStateToFitViewportToNodes } from "@sigma/utils";
-  import LiveViewPanel from "./LiveViewPanel.svelte";
-  import ScorePlot, { type PlotSeries } from "./ScorePlot.svelte";
-  import DebugOverlay from "./DebugOverlay.svelte";
-  import ParamControls from "./components/ParamControls.svelte";
-  import FeatureTooltip from "./components/FeatureTooltip.svelte";
+import LiveViewPanel from "./LiveViewPanel.svelte";
+import ScorePlot, { type PlotSeries } from "./ScorePlot.svelte";
+import DebugOverlay from "./DebugOverlay.svelte";
+import ParamControls from "./components/ParamControls.svelte";
+import FeatureTooltip from "./components/FeatureTooltip.svelte";
   import type { FA2Params, HeuristicWeights } from "./graph/layout-optimizer";
 import { LayoutController } from "./graph";
 import { LayoutTrainer } from "./graph";
@@ -270,8 +270,9 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
 
     if (sigmaInstance) {
       sigmaInstance.setGraph(graph);
-      sigmaInstance.refresh({ skipIndexation: true });
+      sigmaInstance.refresh();
       freezeGridBBox();
+      fitCamera(false);
     }
     attachPreviewGraph(true);
   }
@@ -575,8 +576,27 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
 
   function fitCamera(animate = true) {
     if (!sigmaInstance || !uiState.currentGraph) return;
-    const state = getCameraStateToFitViewportToNodes(sigmaInstance, uiState.currentGraph, { padding: 20 });
-    sigmaInstance.getCamera().animate({ ...state, duration: animate ? 400 : 0 });
+    const graph = uiState.currentGraph;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    graph.forEachNode((_, attr) => {
+      if (attr.x < minX) minX = attr.x;
+      if (attr.x > maxX) maxX = attr.x;
+      if (attr.y < minY) minY = attr.y;
+      if (attr.y > maxY) maxY = attr.y;
+    });
+    if (!isFinite(minX)) return; // no nodes
+    const graphW = maxX - minX;
+    const graphH = maxY - minY;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const dims = sigmaInstance.getDimensions();
+    const padding = 20;
+    const availW = dims.width - 2 * padding;
+    const availH = dims.height - 2 * padding;
+    const ratioW = graphW > 0 ? availW / graphW : Infinity;
+    const ratioH = graphH > 0 ? availH / graphH : Infinity;
+    const ratio = Math.min(ratioW, ratioH);
+    sigmaInstance.getCamera().animate({ x: centerX, y: centerY, ratio, duration: animate ? 400 : 0 });
   }
 
   function fitAll(s: Sigma, g: Graph, opts: { animate: boolean }) {
