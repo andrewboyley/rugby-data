@@ -10,15 +10,17 @@ setup:
     uv sync
 
 # Build the rugby dataset from the ESPN API (resumable, cached)
-dataset:
-    {{ venv }}/rugby-composition-predictor dataset
+dataset *args:
+    {{ venv }}/rugby-composition-predictor dataset {{args}}
 
 # Derive the player co-occurrence graph from the dataset
 graph:
     {{ venv }}/rugby-composition-predictor graph
 
-# Rebuild both dataset and graph
-build: dataset graph
+# Rebuild both dataset and graph (forwards extra args to `dataset`, e.g. --reset)
+build *args:
+    {{ venv }}/rugby-composition-predictor dataset {{args}}
+    {{ venv }}/rugby-composition-predictor graph
 
 # --- web ---------------------------------------------------------------------
 
@@ -26,9 +28,24 @@ build: dataset graph
 web:
     cd web && npm ci && npm run build
 
-# Vite dev server with hot reload (serves repo data/ on /data)
-dev:
-    cd web && npm run dev
+# Dev server management via script (start/stop/restart/status/logs/follow)
+dev-start:
+    cd web && ./scripts/dev-server.sh start
+
+dev-stop:
+    cd web && ./scripts/dev-server.sh stop
+
+dev-restart:
+    cd web && ./scripts/dev-server.sh restart
+
+dev-status:
+    cd web && ./scripts/dev-server.sh status
+
+dev-logs *lines="100":
+    cd web && ./scripts/dev-server.sh logs {{lines}}
+
+dev-follow:
+    cd web && ./scripts/dev-server.sh follow
 
 # Serve the built viewer with Vite (localhost:8787); rebuilds first
 serve: web
@@ -37,12 +54,20 @@ serve: web
 # --- checks ------------------------------------------------------------------
 
 # Verify the package compiles
-check:
+check-python:
+    {{ venv }}/ty check src
     {{ venv }}/python -m compileall -q src
 
 # Lint the codebase (requires ruff)
-lint:
-    {{ venv }}/ruff check src
+lint-python:
+    {{ venv }}/ruff check --fix src
+
+check-web:
+    cd web && npm run typecheck
+
+lint-web:
+    cd web && npm run lint:fix
+    
 
 # --- git ---------------------------------------------------------------------
 

@@ -47,6 +47,8 @@ export function createActiveEdgeOverlay(
     if (layer.width !== pixelWidth || layer.height !== pixelHeight) {
       layer.width = pixelWidth;
       layer.height = pixelHeight;
+      layer.style.width = width + "px";
+      layer.style.height = height + "px";
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);

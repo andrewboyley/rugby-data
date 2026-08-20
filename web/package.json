@@ -10,29 +10,41 @@
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src",
-    "typecheck": "tsc --noEmit && svelte-check --tsconfig ./tsconfig.json --source"
+    "typecheck": "tsc --noEmit && svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
-    "@sigma/node-border": "^3.0.0",
-    "@sigma/utils": "^3.0.0",
+    "@sigma/node-border": "4.0.0-alpha.3",
+    "@sigma/utils": "4.0.0-alpha.2",
     "graphology": "^0.26.0",
+    "graphology-communities-louvain": "^2.0.2",
+    "graphology-components": "^1.5.4",
     "graphology-layout": "^0.6.1",
     "graphology-layout-forceatlas2": "^0.10.1",
-    "sigma": "^3.0.3"
+    "katex": "^0.16.47",
+    "sigma": "4.0.0-alpha.7",
+    "svelte-spa-router": "^5.1.1",
+    "uplot": "^1.6.32"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@playwright/test": "^1.62.1",
     "@sveltejs/kit": "^2.70.2",
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "@tailwindcss/postcss": "^4.3.3",
+    "autoprefixer": "^10.5.4",
+    "daisyui": "^5.7.17",
     "eslint": "^9.39.5",
     "eslint-plugin-svelte": "^2.46.1",
     "globals": "^15.15.0",
+    "postcss": "^8.5.26",
     "prettier": "^3.9.6",
     "prettier-plugin-svelte": "^4.1.1",
     "svelte": "^5.56.8",
     "svelte-check": "^4.7.6",
     "svelte-eslint-parser": "^0.41.1",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
+    "typescript-eslint": "^8.67.0",
     "vite": "^8.2.0"
   }
 }

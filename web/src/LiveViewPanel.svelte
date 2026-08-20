@@ -3,31 +3,39 @@
 	import "uplot/dist/uPlot.min.css";
 	import type { LayoutTickStats } from "./graph/layout";
 
-	let { stats, running, quality, onStartStop, onReset }: {
+	let { stats, running }: {
 		stats: LayoutTickStats[];
 		running: boolean;
-		quality: number;
-		onStartStop: () => void;
-		onReset: () => void;
 	} = $props();
 
 	let chartContainer: HTMLDivElement | null = $state(null);
 	let uplotInstance: InstanceType<typeof uPlot> | null = null;
 	let rafId: number | null = null;
 	let resizeObserver: ResizeObserver | null = null;
+	let pointerInside = false;
 	const MAX_POINTS = 300;
 
 	function getChartData(): Float64Array[] {
 		const n = Math.min(stats.length, MAX_POINTS);
-		if (n === 0) return [new Float64Array(), new Float64Array(), new Float64Array(), new Float64Array(), new Float64Array()];
+		if (n === 0) return Array.from({ length: 13 }, () => new Float64Array());
 		const slice = stats.slice(-n);
 		const t0 = slice[0].timestamp;
+		const cols = (sel: (s: LayoutTickStats) => number) =>
+			new Float64Array(slice.map((s) => Math.max(sel(s), 1e-6)));
 		return [
 			new Float64Array(slice.map((s) => (s.timestamp - t0) / 1000)),
-			new Float64Array(slice.map((s) => Math.max(s.kineticEnergy, 1e-6))),
-			new Float64Array(slice.map((s) => s.meanDisplacement)),
-			new Float64Array(slice.map((s) => s.maxDisplacement)),
-			new Float64Array(slice.map((s) => s.stdDisplacement)),
+			cols((s) => s.kineticEnergy),
+			cols((s) => s.meanDisplacement),
+			cols((s) => s.maxDisplacement),
+			cols((s) => s.stdDisplacement),
+			cols((s) => s.edgeCrossings ?? 0),
+			cols((s) => s.minCrossingAngle ?? 0),
+			cols((s) => s.meanCrossingAngle ?? 0),
+			cols((s) => s.angularResolution ?? 0),
+			cols((s) => s.edgeLengthCV ?? 0),
+			cols((s) => s.nodeSpread ?? 0),
+			cols((s) => s.aspectRatio ?? 1),
+			cols((s) => s.totalEdgeLength ?? 0),
 		];
 	}
 
@@ -44,11 +52,27 @@
 			// @ts-ignore
 			{ label: "Kinetic Energy", stroke: "#e03131", width: 1.5, paths: uPlot.paths.linear(), value: legendValue(3) },
 			// @ts-ignore
-			{ label: "Mean Displacement", stroke: "#1971c2", width: 1, paths: uPlot.paths.linear(), value: legendValue(3) },
+			{ label: "Mean Disp.", stroke: "#1971c2", width: 1, paths: uPlot.paths.linear(), value: legendValue(3), show: false },
 			// @ts-ignore
-			{ label: "Max Displacement", stroke: "#fa923f", width: 1, paths: uPlot.paths.linear(), value: legendValue(3) },
+			{ label: "Max Disp.", stroke: "#fa923f", width: 1, paths: uPlot.paths.linear(), value: legendValue(3), show: false },
 			// @ts-ignore
-			{ label: "Std Displacement", stroke: "#40c057", width: 1, paths: uPlot.paths.linear(), value: legendValue(3) },
+			{ label: "Std Disp.", stroke: "#40c057", width: 1, paths: uPlot.paths.linear(), value: legendValue(3), show: false },
+			// @ts-ignore
+			{ label: "Edge Xings", stroke: "#862e9c", width: 1, paths: uPlot.paths.linear(), value: legendValue(0), show: false },
+			// @ts-ignore
+			{ label: "Min Cross ∠", stroke: "#e8590c", width: 1, paths: uPlot.paths.linear(), value: legendValue(2), show: false },
+			// @ts-ignore
+			{ label: "Mean Cross ∠", stroke: "#109868", width: 1, paths: uPlot.paths.linear(), value: legendValue(2), show: false },
+			// @ts-ignore
+			{ label: "Angular Res", stroke: "#0b7285", width: 1, paths: uPlot.paths.linear(), value: legendValue(2), show: false },
+			// @ts-ignore
+			{ label: "Edge Len CV", stroke: "#c2255c", width: 1, paths: uPlot.paths.linear(), value: legendValue(3), show: false },
+			// @ts-ignore
+			{ label: "Node Spread", stroke: "#5c940d", width: 1, paths: uPlot.paths.linear(), value: legendValue(3), show: false },
+			// @ts-ignore
+			{ label: "Aspect", stroke: "#9c36b5", width: 1, paths: uPlot.paths.linear(), value: legendValue(3), show: false },
+			// @ts-ignore
+			{ label: "Tot Edge Len", stroke: "#e67700", width: 1, paths: uPlot.paths.linear(), value: legendValue(2), show: false },
 		],
 			axes: [
 				{ scale: "x", show: false },
@@ -62,6 +86,30 @@
 		};
 	}
 
+	// Cursor policy: land on the latest point by default; snap to it on mouse
+	// leave; never steal the cursor while the pointer is hovering the plot.
+	// uPlot's legend is driven by pixel left/top, so position the cursor at the
+	// last point's screen coords (idx alone is ignored for the legend).
+	function snapToLatest(plot: uPlot) {
+		const n = Math.min(stats.length, MAX_POINTS);
+		if (n === 0) return;
+		const slice = stats.slice(-n);
+		const t0 = slice[0].timestamp;
+		const xVal = (slice[n - 1].timestamp - t0) / 1000;
+		const yVal = Math.max(slice[n - 1].kineticEnergy, 1e-6);
+		const left = plot.valToPos(xVal, "x");
+		const top = plot.valToPos(yVal, "y");
+		plot.setCursor({ left, top, idx: n - 1 });
+	}
+
+	function snapOnLeave(plot: uPlot) {
+		plot.over.addEventListener("mouseenter", () => (pointerInside = true));
+		plot.over.addEventListener("mouseleave", () => {
+			pointerInside = false;
+			snapToLatest(plot);
+		});
+	}
+
 	function destroyChart() {
 		if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
 		if (uplotInstance) { uplotInstance.destroy(); uplotInstance = null; }
@@ -72,9 +120,12 @@
 		if (!chartContainer) return;
 		const opts = createOpts(w);
 		uplotInstance = new uPlot(opts, getChartData(), chartContainer);
+		snapToLatest(uplotInstance);
+		snapOnLeave(uplotInstance);
 		const tick = () => {
 			if (!uplotInstance) return;
 			uplotInstance.setData(getChartData());
+			if (!pointerInside) snapToLatest(uplotInstance);
 			rafId = requestAnimationFrame(tick);
 		};
 		rafId = requestAnimationFrame(tick);
@@ -112,20 +163,9 @@
 </script>
 
 <div class="flex flex-col gap-3">
-	<!-- Layout controls -->
-	<div class="flex items-center gap-2 mb-2">
-		<button
-			class="btn btn-xs {running ? 'btn-error' : 'btn-primary'}"
-			onclick={onStartStop}
-		>
-			{running ? "Stop" : "Start"} Layout
-		</button>
-		<button class="btn btn-xs btn-ghost" onclick={onReset}>Reset</button>
-	</div>
-
 	{#if !running && stats.length === 0}
 		<div class="flex items-center justify-center h-48 text-base-content/40">
-			<p class="text-sm">Start a layout to see live metrics. Adjust parameters in the sidebar above.</p>
+			<p class="text-sm">Start a layout to see live metrics. Adjust parameters in the sidebar.</p>
 		</div>
 	{:else}
 		<!-- Chart -->
@@ -147,43 +187,16 @@
 				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#1971c2] inline-block"></span> Mean Δ</span>
 				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#fa923f] inline-block"></span> Max Δ</span>
 				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#40c057] inline-block"></span> Std Δ</span>
+				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#862e9c] inline-block"></span> Edge Xings</span>
+				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#e8590c] inline-block"></span> Min Cross ∠</span>
+				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#109868] inline-block"></span> Mean Cross ∠</span>
+				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#0b7285] inline-block"></span> Angular Res</span>
+				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#c2255c] inline-block"></span> Edge Len CV</span>
+				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#5c940d] inline-block"></span> Node Spread</span>
+				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#9c36b5] inline-block"></span> Aspect</span>
+				<span class="flex items-center gap-1"><span class="w-2 h-0.5 bg-[#e67700] inline-block"></span> Tot Edge Len</span>
 			</div>
 		</div>
-
-		<!-- Stats grid -->
-		{#if stats.length > 0}
-			{@const latest = stats[stats.length - 1]}
-			<div class="grid grid-cols-3 gap-2">
-				<div class="stat bg-base-100 border border-base-300 rounded p-2">
-					<div class="stat-title text-[10px]">Quality (Q)</div>
-					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(quality, 9, 4)}</div>
-				</div>
-				<div class="stat bg-base-100 border border-base-300 rounded p-2">
-					<div class="stat-title text-[10px]">Kinetic Energy</div>
-					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.kineticEnergy, 9, 3)}</div>
-				</div>
-				<div class="stat bg-base-100 border border-base-300 rounded p-2">
-					<div class="stat-title text-[10px]">Mean Disp.</div>
-					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.meanDisplacement, 9, 3)}</div>
-				</div>
-				<div class="stat bg-base-100 border border-base-300 rounded p-2">
-					<div class="stat-title text-[10px]">Max Disp.</div>
-					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.maxDisplacement, 9, 3)}</div>
-				</div>
-				<div class="stat bg-base-100 border border-base-300 rounded p-2">
-					<div class="stat-title text-[10px]">Std Disp.</div>
-					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.stdDisplacement, 9, 3)}</div>
-				</div>
-				<div class="stat bg-base-100 border border-base-300 rounded p-2">
-					<div class="stat-title text-[10px]">Settled</div>
-					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.settledProgress * 100, 4, 0)}%</div>
-				</div>
-				<div class="stat bg-base-100 border border-base-300 rounded p-2">
-					<div class="stat-title text-[10px]">Nodes</div>
-					<div class="stat-value text-sm font-mono tabular-nums text-right w-24">{formatNum(latest.nodeCount, 4, 0)}</div>
-				</div>
-			</div>
-		{/if}
 	{/if}
 </div>
 

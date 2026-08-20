@@ -42,8 +42,10 @@ export function teamSecondaryColorOrNull(teams: Record<number, RawTeamInfo>, tea
 
 export function nodeFillColor(
   mode: string,
-  opts: { teams: Record<number, RawTeamInfo>; teamId: number | null; jersey: number | null },
+  opts: { teams: Record<number, RawTeamInfo>; teamId: number | null; jersey: number | null; isCoach?: boolean },
 ): string {
+  // Coaches colour exactly like players so they read consistently in every
+  // view; `isCoach` is accepted for API symmetry but does not change the fill.
   if (mode === "team") return teamColorOrFallback(opts.teams, opts.teamId);
   if (mode === "neutral") return NEUTRAL_NODE_COLOR;
   return jerseyColor(opts.jersey);
@@ -71,9 +73,9 @@ const MIN_BORDER_SATURATION = 0.4;
 export function needsBorder(color: string | undefined | null): string {
   if (!color || color === "transparent") return "transparent";
   const [r, g, b] = hexToRgb(color);
-  const [, s, l] = rgbToHsl(r, g, b);
+  const [h, s, l] = rgbToHsl(r, g, b);
   if (l >= MIN_BORDER_LIGHTNESS) return color;
-  const [nr, ng, nb] = hslToRgb(0, Math.max(s, MIN_BORDER_SATURATION), MIN_BORDER_LIGHTNESS);
+  const [nr, ng, nb] = hslToRgb(h, Math.max(s, MIN_BORDER_SATURATION), MIN_BORDER_LIGHTNESS);
   return rgbToHex(nr, ng, nb);
 }
 
@@ -81,8 +83,8 @@ function hexToRgb(hex: string): [number, number, number] {
   const body = hex.replace("#", "");
   return [
     parseInt(body.substring(0, 2), 16) || 0,
-    parseInt(body.substring(2, 2), 16) || 0,
-    parseInt(body.substring(4, 2), 16) || 0,
+    parseInt(body.substring(2, 4), 16) || 0,
+    parseInt(body.substring(4, 6), 16) || 0,
   ];
 }
 

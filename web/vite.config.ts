@@ -37,10 +37,16 @@ function repoData() {
   const handleData = (req: any, res: any, next: () => void) => {
     const target = path.join(repoRoot, "data", req.url);
     const root = path.join(repoRoot, "data");
-    const safe =
-      existsSync(target) &&
-      statSync(target).isFile() &&
-      path.resolve(target).startsWith(root);
+    let safe = false;
+    try {
+      safe =
+        existsSync(target) &&
+        statSync(target).isFile() &&
+        path.resolve(target).startsWith(root);
+    } catch (e) {
+      // If any synchronous check fails, treat as unsafe to prevent 500 errors
+      safe = false;
+    }
     if (!safe) {
       next();
       return;
@@ -82,7 +88,7 @@ function repoData() {
 }
 
 export default defineConfig({
-  base: "./",
+  base: "/",
   build: { outDir: "../dist" },
   preview: { port: 8787, strictPort: true },
   plugins: [svelte(), repoData()],

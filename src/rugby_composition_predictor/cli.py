@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from .api import EspnApi
-from .builder import DatasetBuilder
+from .builder import NEG_FAIL_PREFIX, DatasetBuilder
 from .cache import ApiCache
 from .config import (
     DEFAULT_CACHE_PATH,
@@ -24,9 +24,23 @@ def build_dataset(
     cache_path: Path = DEFAULT_CACHE_PATH,
     team_ids: list[str] | None = None,
     source: str = "rims-first",
+    reset: bool = False,
+    skip_failed: bool = False,
 ) -> None:
     cache = ApiCache(cache_path)
-    dataset = Dataset.load(dataset_path)
+    if reset:
+        # Forget which events were already processed AND start from an empty
+        # dataset, so every discovered event is re-derived from the cached raw
+        # responses. This discards any stale data from a previous schema (e.g.
+        # source-prefixed ids) and re-runs the parse/merge. No re-download.
+        cache.reset_processed_to(set())
+        # Also drop the permanently-failed markers so --reset truly re-checks
+        # every match (the ESPN-fallback negatives are kept to avoid re-search).
+        cache.delete_prefix(NEG_FAIL_PREFIX)
+        dataset = Dataset()
+        print("== Reset: cleared processed markers; rebuilding from empty dataset ==")
+    else:
+        dataset = Dataset.load(dataset_path)
     espn_api = EspnApi(cache)
     rims_api = RimsApi(cache)
     builder = DatasetBuilder(
@@ -50,7 +64,7 @@ def build_dataset(
     print()
 
     with RichProgressBar() as progress:
-        builder.build(progress)
+        builder.build(progress, skip_failed=skip_failed)
 
 
 def build_graph(
@@ -97,6 +111,18 @@ def main(argv=None) -> None:
         choices=["rims-first", "rims", "espn"],
         help="data source: rims-first (default), rims, or espn",
     )
+    dataset_cmd.add_argument(
+        "--reset",
+        action="store_true",
+        help="clear processed-event markers and re-derive the dataset from "
+        "the API cache (no re-download; use after deleting dataset.json)",
+    )
+    dataset_cmd.add_argument(
+        "--skip-failed",
+        action="store_true",
+        help="skip matches previously recorded as permanently unresolvable "
+        "(RIMS has no roster and no usable ESPN fallback)",
+    )
 
     graph_cmd = sub.add_parser("graph", help="build graph.json")
     graph_cmd.add_argument(
@@ -119,6 +145,8 @@ def main(argv=None) -> None:
             Path(args.cache),
             team_ids=team_ids,
             source=args.source,
+            reset=args.reset,
+            skip_failed=args.skip_failed,
         )
     elif args.command == "graph":
         build_graph(Path(args.input), Path(args.output))

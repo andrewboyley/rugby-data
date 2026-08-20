@@ -22,7 +22,10 @@ Africa); omit it to fetch all international teams.
 
 Both commands are resumable and idempotent. Raw API responses are cached in
 `data/api_cache.json`, so re-runs are fast and do not hit the network for
-already-fetched events.
+already-fetched events. If you delete `dataset.json` and want a full
+re-derive, pass `--reset`: it clears the processed-event markers and rebuilds
+from the cached raw responses (no re-download). To force a true re-download,
+delete `data/api_cache.json` as well.
 
 ## Visualisation
 
@@ -71,35 +74,43 @@ src/    rugby_composition_predictor package
     {
       "eventId": 281087,
       "date": "2016-08-20T15:05Z",
-      "venueId": "rims:62",
-      "leagueId": "rims:Tour 2016",
+      "venueId": "62",
+      "leagueId": "Tour 2016",
       "competitors": [
-        {"teamId": 5, "home": true,  "score": 30, "coachId": "13193",
+        {"teamId": 39, "home": true,  "score": 30, "coachId": "13193",
          "roster": [{"playerId": 144732, "jersey": 15}]},
-        {"teamId": 10, "home": false, "score": 23, "coachId": "3114",
+        {"teamId": 40, "home": false, "score": 23, "coachId": "3114",
          "roster": [{"playerId": 141716, "jersey": 15}]}
       ]
     }
   ],
-  "teams":  {"5": "South Africa", "10": "Argentina"},
+  "teams":  {"39": "South Africa", "40": "Argentina"},
   "players": {"144732": "Johan Goosen"},
-  "venues":  {"rims:62": {"name": "Eden Park", "city": "Auckland",
-                          "country": "New Zealand"},
-              "espn:98000": {"name": "Teufaiva Stadium", "city": "Nuku'alofa",
-                             "country": "Tonga"}},
-  "leagues": {"rims:Tour 2016": {"name": "Tour 2016", "abbreviation": "Tour 2016"},
-              "espn:10659": {"name": "International Test Match",
-                             "abbreviation": "International Test Match"}},
+  "venues":  {"62": {"name": "Eden Park", "city": "Auckland",
+                     "country": "New Zealand"},
+              "98000": {"name": "Teufaiva Stadium", "city": "Nuku'alofa",
+                        "country": "Tonga"}},
+  "leagues": {"Tour 2016": {"name": "Tour 2016", "abbreviation": "Tour 2016"},
+              "10659": {"name": "International Test Match",
+                        "abbreviation": "International Test Match"}},
   "coaches": {"13193": "Steve Hansen", "3114": "Warren Gatland"}
 }
 ```
 
-- `venues`: keyed by source-prefixed id (e.g. `"rims:62"`, `"espn:98000"`)
-  → `{name, city, country}`. RIMS ids come from the match's `venue`, ESPN ids
-  from `gameInfo.venue`.
-- `leagues`: keyed by source-prefixed id (e.g. `"rims:Tour 2016"`,
-  `"espn:10659"`) → `{name, abbreviation}`. RIMS ids derive from the match's
-  `competition`, ESPN ids from `header.league`.
+All entity ids use the **RIMS/Opta id space** as the canonical namespace
+(World Rugby RIMS is Opta's rugby platform, so its numeric ids are Opta/Pulselive
+ids). The old `rims:`/`espn:` source prefixes are gone.
+
+- `teams` / `players` / `coaches`: keyed by their RIMS/Opta id (numeric for
+  teams, numeric player ids for players and coaches). ESPN-sourced players are
+  best-effort canonicalised onto their RIMS/Opta id via a shared display name.
+- `venues`: keyed by the RIMS/Opta venue id (e.g. `"62"`) → `{name, city,
+  country}`. ESPN venues have no Opta crosswalk, so they keep their ESPN id
+  (e.g. `"98000"`).
+- `leagues`: keyed by the RIMS competition name (e.g. `"Tour 2016"`) or, for
+  ESPN-sourced matches, the ESPN league id (e.g. `"10659"`) → `{name,
+  abbreviation}`. RIMS derives the key from the match's `competition`; ESPN
+  from `header.league`.
 - `coaches`: keyed by player id → display name. Populated from competitor
   roster entries flagged as coach / management in the source feed.
 

@@ -190,3 +190,12 @@ RIMS_TEAM_IDS: dict[str, str] = {
     "289514": "751",  # Paraguay
     "289530": "2389",  # Burkina Faso
 }
+
+# Fallback team names for RIMS team IDs where the API doesn't provide a name.
+# Keyed by RIMS team ID (str).
+RIMS_TEAM_NAMES: dict[str, str] = {
+    "36": "Ireland",
+    "38": "Australia",
+    "49": "Japan",
+    "51": "USA",
+}

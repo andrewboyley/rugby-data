@@ -22,3 +22,43 @@ data/*
 *.gz
 # CocoIndex Code (ccc)
 /.cocoindex_code/
+
+# Agent / tooling internal state (not project source)
+.opencode/
+.ralph/
+/.cocoindex/
+.cursor/
+.claude/
+
+# Build / test artifacts
+dist/
+web/dist/
+test-results/
+web/test-results/
+.coverage/
+htmlcov/
+*.last-run.json
+
+# Local dev server runtime files
+web/.agent/
+*.pid
+
+# Editor & OS cruft
+*.swp
+*~
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Secrets / local config (never commit)
+.env
+.env.*
+*.local
+
+# Backup / scratch files
+*.backup
+*.bak
+*.orig
+*.rej
+*.log

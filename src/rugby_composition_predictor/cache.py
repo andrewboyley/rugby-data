@@ -91,6 +91,13 @@ class ApiCache:
         with self._lock:
             self._processed = {_norm_processed_key(e) for e in event_ids}
 
+    def delete_prefix(self, prefix: str) -> None:
+        """Remove all entries whose key starts with `prefix` (e.g. negatives)."""
+        with self._lock:
+            for key in [k for k in self._entries if k.startswith(prefix)]:
+                del self._entries[key]
+        self.save()
+
     # ---- persistence ----
 
     def save(self, force: bool = False) -> None:

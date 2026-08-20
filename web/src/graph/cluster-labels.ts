@@ -6,7 +6,12 @@ import type { Sigma } from "sigma";
 import type Graph from "graphology";
 
 export interface ClusterLabels {
-  update(sigma: Sigma, graph: Graph, interactedNodeIds: (string | null)[]): void;
+  update(
+    sigma: Sigma,
+    graph: Graph,
+    interactedNodeIds: (string | null)[],
+    hoveredTeamId?: number | null,
+  ): void;
   clear(): void;
 }
 
@@ -39,7 +44,12 @@ export function createClusterLabels(
     return div;
   }
 
-  function update(sigma: Sigma, graph: Graph, interactedNodeIds: (string | null)[]): void {
+  function update(
+    sigma: Sigma,
+    graph: Graph,
+    interactedNodeIds: (string | null)[],
+    hoveredTeamId: number | null = null,
+  ): void {
     const groups = new Map<number, { sx: number; sy: number; count: number }>();
     graph.forEachNode((_key, attrs) => {
       if (attrs.team == null) return;
@@ -68,7 +78,8 @@ export function createClusterLabels(
       div.style.display = "block";
       div.style.left = `${point.x}px`;
       div.style.top = `${point.y}px`;
-      div.classList.toggle("sigma-cluster-dim", dimmed);
+      const oppositeTeamDimmed = hoveredTeamId != null && teamId !== hoveredTeamId;
+      div.classList.toggle("sigma-cluster-dim", dimmed || oppositeTeamDimmed);
     }
   }
 

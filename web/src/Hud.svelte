@@ -1,6 +1,6 @@
 <script lang="ts">
 import { teamName, teamAbbreviation } from "./lib.ts";
-import type { Node, PlayerMatch, EdgeSelection as _EdgeSelection } from "./types.ts";
+import type { GraphNode as Node, PlayerMatch, EdgeSelection as _EdgeSelection } from "./types.ts";
 
 let {
 		node,

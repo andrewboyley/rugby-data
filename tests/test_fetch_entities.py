@@ -70,21 +70,27 @@ def main() -> int:
 
     if game is not None:
         check(
-            bool(game.venue_id) and game.venue_id.startswith("rims:"),
-            f"game.venue_id starts with 'rims:' (got {game.venue_id!r})",
+            bool(game.venue_id) and game.venue_id.isdigit(),
+            f"game.venue_id is canonical RIMS/Opta numeric id (got {game.venue_id!r})",
         )
+        competition = summary.get("match", {}).get("competition")
         check(
-            bool(game.league_id) and game.league_id.startswith("rims:"),
-            f"game.league_id starts with 'rims:' (got {game.league_id!r})",
+            bool(game.league_id) and game.league_id == competition,
+            f"game.league_id is the RIMS competition name (got {game.league_id!r})",
         )
         has_coach = any(c.coach_id for c in game.competitors)
-        check(
-            has_coach,
-            "at least one competitor has a coach_id",
-        )
+        check(has_coach, "at least one competitor has a coach_id")
         check(bool(dataset.venues), "dataset.venues populated from RIMS")
         check(bool(dataset.leagues), "dataset.leagues populated from RIMS")
         check(bool(dataset.coaches), "dataset.coaches populated from RIMS")
+        check(
+            not any(k.startswith(("rims:", "espn:")) for k in dataset.venues),
+            "venue keys are prefix-free (canonical Opta/RIMS)",
+        )
+        check(
+            not any(k.startswith(("rims:", "espn:")) for k in dataset.leagues),
+            "league keys are prefix-free (canonical Opta/RIMS)",
+        )
     else:
         check(False, "RIMS game available for core assertions")
 
@@ -103,16 +109,35 @@ def main() -> int:
             builder._register_league_from_site_web(espn_summary)
         except Exception as exc:
             print(f"  [WARN] ESPN register failed: {exc}")
-        has_espn_venue = any(k.startswith("espn:") for k in dataset.venues)
-        has_espn_league = any(k.startswith("espn:") for k in dataset.leagues)
+        has_espn_venue = any(
+            not k.startswith(("rims:", "espn:")) for k in dataset.venues
+        )
+        has_espn_league = any(
+            not k.startswith(("rims:", "espn:")) for k in dataset.leagues
+        )
         check(
             has_espn_venue,
-            "dataset.venues contains an 'espn:' key after registering",
+            "dataset.venues got an ESPN id (prefix-free) after registering",
         )
         check(
             has_espn_league,
-            "dataset.leagues contains an 'espn:' key after registering",
+            "dataset.leagues got an ESPN id (prefix-free) after registering",
         )
+
+    # ---- ESPN team id -> RIMS/Opta mapping ----
+    print("\n[ESPN] team id canonicalised to RIMS/Opta")
+    from rugby_composition_predictor.config import RIMS_TEAM_IDS
+
+    sample_espn = 5  # South Africa (ESPN id)
+    expected_rims = int(RIMS_TEAM_IDS["5"])  # 39 (RIMS/Opta id)
+    check(
+        builder._to_rims_team_id(sample_espn) == expected_rims,
+        f"ESPN team {sample_espn} -> RIMS/Opta {expected_rims}",
+    )
+    check(
+        builder._to_rims_team_id(999999) == 999999,
+        "unknown ESPN team id falls back to itself",
+    )
 
     # ---- Model round-trip ----
     print("\n[Model] venue / league / coach round-trip")

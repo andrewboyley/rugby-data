@@ -17,6 +17,7 @@ from .config import (
     INTERNATIONAL_TEAM_IDS,
     RIMS_MAX_WORKERS,
     RIMS_TEAM_IDS,
+    RIMS_TEAM_NAMES,
     SECONDARY_KIT_COLOURS,
     YEARS,
 )
@@ -25,6 +26,11 @@ from .espn_site_web_api import EspnSiteWebApi
 from .models import Competitor, Game, RosterEntry
 from .reporting import BuildListener
 from .rims_api import RimsApi
+
+# Prefix for cache entries recording a match that is deterministically
+# unresolvable (RIMS has no usable roster and no ESPN fallback exists/completes).
+# Used by --skip-failed to omit such matches on subsequent builds.
+NEG_FAIL_PREFIX = "negative://failed/"
 
 
 @dataclass
@@ -71,7 +77,11 @@ class DatasetBuilder:
         if source in ("rims-first", "rims"):
             self._max_workers = min(self._max_workers, RIMS_MAX_WORKERS)
 
-    def build(self, listener: BuildListener | None = None) -> None:
+    def build(
+        self,
+        listener: BuildListener | None = None,
+        skip_failed: bool = False,
+    ) -> None:
         for game in self._dataset.games:
             self._cache.mark_processed(game.event_id)
 
@@ -79,6 +89,20 @@ class DatasetBuilder:
         pending = [
             u for u in event_urls if not self._cache.is_processed(event_id_from_url(u))
         ]
+        if skip_failed:
+            skipped = [
+                u for u in pending
+                if self._is_terminal_fail(event_id_from_url(u))
+            ]
+            if skipped:
+                pending = [
+                    u for u in pending
+                    if not self._is_terminal_fail(event_id_from_url(u))
+                ]
+                print(
+                    f"[skip] {len(skipped)} previously-failed matches (--skip-failed)",
+                    file=sys.stderr,
+                )
 
         print(
             f"[1/2] Found {len(event_urls)} events, {len(pending)} to fetch\n",
@@ -91,18 +115,23 @@ class DatasetBuilder:
         t0 = time.time()
         results: list[FetchResult] = []
         with ThreadPoolExecutor(max_workers=self._max_workers) as pool:
-            futures = {pool.submit(self._fetch_game, u): u for u in pending}
-            for i, future in enumerate(as_completed(futures), 1):
+            future_to_url = {pool.submit(self._fetch_game, u): u for u in pending}
+            for i, future in enumerate(as_completed(future_to_url), 1):
+                event_url = future_to_url[future]
                 result = future.result()
                 results.append(result)
                 game = result.game
                 if game is not None and game.is_complete():
-                    self._cache.mark_processed(game.event_id)
+                    self._cache.mark_processed(event_id_from_url(event_url))
                     self._dataset.merge([game])
                 self._report(listener, i, result)
                 if i % self._save_every == 0 or i == len(pending):
                     self._dataset.save(self._output_path)
-                    self._cache.save(force=True)
+                    # Only rewrite the cache if a real network fetch added a
+                    # response this run; on a from-cache rebuild nothing was
+                    # fetched, so a soft save is a no-op (avoids rewriting the
+                    # multi-MB cache file needlessly).
+                    self._cache.save()
 
         self._dataset.save(self._output_path)
         self._cache.save(force=True)
@@ -112,9 +141,6 @@ class DatasetBuilder:
         elapsed = time.time() - t0
         self._print_summary(len(pending), elapsed)
         self._print_failures(results)
-
-    # ---- discovery ----
-
     def _discover_event_urls(self) -> list[str]:
         urls: set[str] = set()
         if self._source in ("rims-first", "rims"):
@@ -175,6 +201,7 @@ class DatasetBuilder:
                 game = self._game_from_rims(summary)
                 if game.is_complete():
                     return FetchResult(game, None, match_id, source="rims")
+                self._record_terminal_fail(match_id, "RIMS game incomplete")
                 msg = "RIMS game incomplete"
                 return FetchResult(None, msg, match_id, source="rims", partial=game)
             except Exception as exc:
@@ -213,6 +240,7 @@ class DatasetBuilder:
                     if rims_game is not None
                     else f"RIMS error ({rims_error}); no ESPN match found"
                 )
+                self._record_terminal_fail(match_id, error)
                 return FetchResult(None, error, match_id, source="rims→espn",
                                    fell_back=True, partial=rims_game)
             # ESPN tier: the site web API is a complete source (teams, scores,
@@ -226,6 +254,9 @@ class DatasetBuilder:
             path = self._espn_event_path(espn_url)
             if path is not None:
                 self._record_neg_lineup(path[1], "ESPN site web incomplete")
+            self._record_terminal_fail(
+                match_id, "RIMS incomplete; ESPN site web incomplete"
+            )
             return FetchResult(
                 None, f"RIMS {rims_status}; ESPN site web incomplete", match_id,
                 source="rims→espn", fell_back=True,
@@ -298,6 +329,11 @@ class DatasetBuilder:
         roster: list[RosterEntry] = []
         for entry in entries:
             try:
+                # Skip coach/management entries: RIMS lists them inside the
+                # squad with a null jersey number. Without this filter the head
+                # coach appears in the roster (and graph) as a player.
+                if self._is_rims_staff(entry):
+                    continue
                 player_id = str(entry.get("player", {}).get("id") or "")
                 self._register_player_from_rims(player_id, entry)
                 roster.append(
@@ -318,7 +354,8 @@ class DatasetBuilder:
         venue_id = venue.get("id")
         if not venue_id:
             return None
-        key = f"rims:{venue_id}"
+        # RIMS ids are Opta/Pulselive ids — use them as the canonical key.
+        key = str(venue_id)
         if self._dataset.venue_name(key):
             return key
         try:
@@ -336,7 +373,8 @@ class DatasetBuilder:
         competition = match.get("competition")
         if not competition or not isinstance(competition, str):
             return None
-        key = f"rims:{competition}"
+        # RIMS competition names are the only stable league key RIMS exposes.
+        key = competition
         if self._dataset.league_name(key):
             return key
         try:
@@ -345,12 +383,16 @@ class DatasetBuilder:
             print(f"[WARN] RIMS league register failed: {exc}", file=sys.stderr)
         return key
 
+    def _is_rims_staff(self, entry: dict) -> bool:
+        """True when a RIMS squad entry is coach/management staff, not a player."""
+        label = (entry.get("positionLabel") or "").lower()
+        role = (entry.get("role") or "").lower()
+        return "coach" in label or "management" in role
+
     def _extract_rims_coach(self, team_data: dict) -> str | None:
         for entry in (team_data.get("teamList") or {}).get("list") or []:
             try:
-                label = (entry.get("positionLabel") or "").lower()
-                role = (entry.get("role") or "").lower()
-                if "coach" not in label and "management" not in role:
+                if not self._is_rims_staff(entry):
                     continue
                 player = entry.get("player") or {}
                 coach_id = str(player.get("id") or "")
@@ -374,9 +416,17 @@ class DatasetBuilder:
         if self._dataset.team_name(team_id):
             return
         try:
-            name = meta.get("name") or str(team_id)
+            # Try meta.name first, then fall back to RIMS_TEAM_NAMES mapping
+            name = meta.get("name") or RIMS_TEAM_NAMES.get(str(team_id)) or str(team_id)
+            # Map RIMS team ID to ESPN ID for colour lookup
+            # RIMS_TEAM_IDS maps ESPN ID -> RIMS ID, so we need to reverse lookup
+            espn_team_id = None
+            for espn_id, rims_id in RIMS_TEAM_IDS.items():
+                if rims_id == str(team_id):
+                    espn_team_id = espn_id
+                    break
             color = (
-                HOME_KIT_COLOURS.get(str(team_id))
+                (HOME_KIT_COLOURS.get(espn_team_id) if espn_team_id else None)
                 or meta.get("color")
                 or team_data.get("colour")
                 or team_data.get("color")
@@ -385,15 +435,23 @@ class DatasetBuilder:
                 color = "#" + color.lstrip("#")
             else:
                 color = None
-            alternate_color = SECONDARY_KIT_COLOURS.get(str(team_id)) or team_data.get(
-                "alternateColour"
+            alternate_color = (
+                (SECONDARY_KIT_COLOURS.get(espn_team_id) if espn_team_id else None)
+                or team_data.get("alternateColour")
             )
             if alternate_color and isinstance(alternate_color, str):
                 alternate_color = "#" + alternate_color.lstrip("#")
             else:
                 alternate_color = None
+            # Extract abbreviation from RIMS naming array (team detail) or meta (match summary)
+            abbreviation = None
+            naming = team_data.get("naming", [])
+            if naming and isinstance(naming[0], dict):
+                abbreviation = naming[0].get("abbr")
+            if not abbreviation and isinstance(meta, dict):
+                abbreviation = meta.get("abbreviation")
             self._dataset.register_team(
-                team_id, name, color, alternate_color=alternate_color
+                team_id, name, color, alternate_color=alternate_color, abbreviation=abbreviation
             )
         except Exception as exc:
             print(
@@ -442,6 +500,21 @@ class DatasetBuilder:
 
     def _record_neg_lineup(self, event_id: str, reason: str) -> None:
         self._cache.put(self._neg_lineup_key(event_id), {"reason": reason})
+
+    # ---- negative cache: permanently-unresolvable matches ----
+    # A match that is deterministically unresolvable (RIMS has no usable roster
+    # and no ESPN fallback exists or completes) is recorded so a --skip-failed
+    # run can omit it. Cleared by `dataset --reset`. Transient errors are NOT
+    # recorded here (see the `unexpected` branch) so they stay retried.
+
+    def _neg_fail_key(self, event_id: str) -> str:
+        return f"{NEG_FAIL_PREFIX}{event_id}"
+
+    def _is_terminal_fail(self, event_id: str) -> bool:
+        return self._cache.get(self._neg_fail_key(event_id)) is not None
+
+    def _record_terminal_fail(self, event_id: str, reason: str) -> None:
+        self._cache.put(self._neg_fail_key(event_id), {"reason": reason})
 
     def _get_espn_fallback_url(self, match_id: str) -> str | None:
         if match_id in self._espn_fallback_map:
@@ -523,13 +596,14 @@ class DatasetBuilder:
             competitors = []
             for roster_block in summary.get("rosters") or []:
                 team = roster_block.get("team") or {}
-                team_id = int(team.get("id") or 0)
-                self._register_team_from_site_web(team_id, team)
+                espn_team_id = int(team.get("id") or 0)
+                team_id = self._to_rims_team_id(espn_team_id)
+                self._register_team_from_site_web(team_id, team, espn_team_id)
                 competitors.append(
                     Competitor(
                         team_id=team_id,
                         home=roster_block.get("homeAway") == "home",
-                        score=scores_by_team.get(team_id),
+                        score=scores_by_team.get(espn_team_id),
                         roster=self._parse_site_web_roster(
                             roster_block.get("roster") or []
                         ),
@@ -557,7 +631,8 @@ class DatasetBuilder:
         venue_id = venue.get("id")
         if not venue_id:
             return None
-        key = f"espn:{venue_id}"
+        # ESPN has no Opta crosswalk for venues; the ESPN id is used as-is.
+        key = str(venue_id)
         if self._dataset.venue_name(key):
             return key
         try:
@@ -583,7 +658,8 @@ class DatasetBuilder:
         league_id = league.get("id")
         if not league_id:
             return None
-        key = f"espn:{league_id}"
+        # ESPN has no Opta crosswalk for leagues; the ESPN id is used as-is.
+        key = str(league_id)
         if self._dataset.league_name(key):
             return key
         try:
@@ -604,25 +680,32 @@ class DatasetBuilder:
         except (TypeError, ValueError):
             return None
 
-    def _register_team_from_site_web(self, team_id: int, team: dict) -> None:
+    def _register_team_from_site_web(
+        self, team_id: int, team: dict, espn_team_id: int | None = None
+    ) -> None:
         if self._dataset.team_name(team_id):
             return
         try:
             name = team.get("displayName") or team.get("name") or str(team_id)
-            color = HOME_KIT_COLOURS.get(str(team_id)) or team.get("color")
+            # Curated kit colours are keyed by ESPN id; the canonical team id
+            # is the RIMS/Opta id, so look colours up via the ESPN id when known.
+            colour_key = str(espn_team_id) if espn_team_id is not None else str(team_id)
+            color = HOME_KIT_COLOURS.get(colour_key) or team.get("color")
             if color and isinstance(color, str):
                 color = "#" + color.lstrip("#")
             else:
                 color = None
             alternate_color = (
-                SECONDARY_KIT_COLOURS.get(str(team_id)) or team.get("alternateColor")
+                SECONDARY_KIT_COLOURS.get(colour_key) or team.get("alternateColor")
             )
             if alternate_color and isinstance(alternate_color, str):
                 alternate_color = "#" + alternate_color.lstrip("#")
             else:
                 alternate_color = None
+            # ESPN team may have abbreviation field
+            abbreviation = team.get("abbreviation")
             self._dataset.register_team(
-                team_id, name, color, alternate_color=alternate_color
+                team_id, name, color, alternate_color=alternate_color, abbreviation=abbreviation
             )
         except Exception as exc:
             print(
@@ -637,15 +720,29 @@ class DatasetBuilder:
             return None
         return m.group(1), m.group(2)
 
+    def _to_rims_team_id(self, espn_team_id: int) -> int:
+        """Map an ESPN team id to its canonical RIMS/Opta id where known."""
+        mapped = RIMS_TEAM_IDS.get(str(espn_team_id))
+        return int(mapped) if mapped else espn_team_id
+
     def _parse_site_web_roster(self, entries: list) -> list[RosterEntry]:
         roster: list[RosterEntry] = []
         for entry in entries:
             try:
                 athlete = entry.get("athlete") or {}
-                player_id = str(athlete.get("id") or "")
-                if not player_id:
+                espn_player_id = str(athlete.get("id") or "")
+                if not espn_player_id:
                     continue
-                self._register_player_from_site_web(player_id, athlete)
+                name = (
+                    athlete.get("displayName")
+                    or athlete.get("fullName")
+                    or espn_player_id
+                )
+                # Canonicalise onto the RIMS/Opta player id via a shared display
+                # name when one already exists; otherwise keep the ESPN id.
+                player_id = self._dataset.player_id_by_name(name) or espn_player_id
+                if player_id == espn_player_id:
+                    self._register_player_from_site_web(espn_player_id, athlete)
                 roster.append(
                     RosterEntry(
                         player_id=player_id,
@@ -654,7 +751,7 @@ class DatasetBuilder:
                 )
             except Exception as exc:
                 print(
-                    f"[WARN] site web roster entry skipped: {exc}", file=sys.stderr
+                    f"[WARN] site web roster entry skipped: {exc}", file=sys.stderr,
                 )
         return roster
 

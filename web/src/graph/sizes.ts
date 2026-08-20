@@ -2,9 +2,11 @@
 
 const MIN_NODE_SIZE = 4;
 const NODE_SIZE_SCALE = 3;
+const COACH_SIZE_MULTIPLIER = 1.4;
 
-export function nodeSize(node: { app: number }, maxApp: number): number {
-  return MIN_NODE_SIZE + NODE_SIZE_SCALE * Math.sqrt((node.app || 0) / maxApp);
+export function nodeSize(node: { app: number; isCoach?: boolean }, maxApp: number): number {
+  const base = MIN_NODE_SIZE + NODE_SIZE_SCALE * Math.sqrt((node.app || 0) / maxApp);
+  return node.isCoach ? base * COACH_SIZE_MULTIPLIER : base;
 }
 
 const MIN_EDGE_SIZE = 0.4;

@@ -2,7 +2,7 @@
 
 import { UndirectedGraph } from "graphology";
 import { edgeKey } from "../lib.ts";
-import type { Link, Player } from "../types.ts";
+import type { Link, GraphNode as Node } from "../types.ts";
 import {
   applyAlpha,
   alphaOf,
@@ -14,10 +14,10 @@ import {
 } from "./colors.ts";
 import { nodeSize, edgeSize } from "./sizes.ts";
 
-const INITIAL_JITTER_SPREAD = 4;
+const INITIAL_JITTER_SPREAD = 100;
 
 export interface _BuildGraphOpts {
-  nodes: Player[];
+  nodes: Node[];
   links: Link[];
   prevPos: Map<number, { x: number; y: number }>;
   teams: Record<number, { name: string; color: string; alternateColor?: string }>;
@@ -62,12 +62,13 @@ interface NodeAttrOpts {
   maxApp: number;
 }
 
-function nodeAttributes(node: Player, opts: NodeAttrOpts): Record<string, unknown> {
+function nodeAttributes(node: Node, opts: NodeAttrOpts): Record<string, unknown> {
   const p = opts.prevPos.get(node.id);
   const fill = nodeFillColor(opts.nodeColorMode, {
     teams: opts.teams,
     teamId: node.team,
-    jersey: node.jersey,
+    jersey: "jersey" in node ? node.jersey : null,
+    isCoach: node.isCoach,
   });
   const border = needsBorder(
     teamSecondaryColorOrNull(opts.teams, node.team) || fill
@@ -75,16 +76,16 @@ function nodeAttributes(node: Player, opts: NodeAttrOpts): Record<string, unknow
   return {
     label: node.name,
     color: fill,
-    type: "border",
     borderColor: border,
     size: nodeSize(node, opts.maxApp),
     x: p?.x ?? Math.random() * INITIAL_JITTER_SPREAD - INITIAL_JITTER_SPREAD / 2,
     y: p?.y ?? Math.random() * INITIAL_JITTER_SPREAD - INITIAL_JITTER_SPREAD / 2,
     name: node.name,
     team: node.team,
-    jersey: node.jersey,
+    jersey: "jersey" in node ? node.jersey : null,
     app: node.app,
     deg: node.deg,
+    isCoach: node.isCoach ? true : false,
   };
 }
 
