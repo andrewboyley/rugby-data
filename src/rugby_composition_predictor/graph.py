@@ -123,7 +123,11 @@ class CoOccurrenceGraph:
                 # Coach-Player edges (same team)
                 if coach_node_id:
                     for player_id in roster:
-                        pair = tuple(sorted((coach_node_id, player_id)))
+                        pair = (
+                            (coach_node_id, player_id)
+                            if coach_node_id <= player_id
+                            else (player_id, coach_node_id)
+                        )
                         coach_weights[pair] += 1
                         if date:
                             coach_edge_dates[pair].add(date)
@@ -339,6 +343,7 @@ class CoOccurrenceGraph:
                         break
                 if not side:
                     continue
+                assert game is not None
                 opp = next((c for c in game.competitors if c != side), None)
                 if not opp:
                     continue

@@ -544,7 +544,7 @@ private createSigma(): Sigma {
 
     const s = new Sigma(this.graph!, this.opts.host, createSigmaOptions({ nodeReducer, edgeReducer }));
 
-    s.render();
+    s.refresh();
 
     // Reference grid (lines + coordinate labels), drawn on its own canvas
     // behind sigma's render canvas. Shared with the test page via grid.ts.
@@ -583,7 +583,7 @@ private createSigma(): Sigma {
     }
 
     // Force render
-    s.render();
+    s.refresh();
 
     this.clusterLabels = createClusterLabels(
       s.createLayer("clusters", "div"),

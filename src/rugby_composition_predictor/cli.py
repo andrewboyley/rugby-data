@@ -1,6 +1,7 @@
 """Command-line entry points for the rugby composition predictor."""
 
 import argparse
+import io
 import sys
 from pathlib import Path
 
@@ -80,8 +81,9 @@ def build_graph(
 
 def main(argv=None) -> None:
     try:
-        sys.stdout.reconfigure(line_buffering=True)
-    except AttributeError:
+        if isinstance(sys.stdout, io.TextIOWrapper):
+            sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
         pass
 
     parser = argparse.ArgumentParser(

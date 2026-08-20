@@ -7,6 +7,7 @@ from rich.progress import (
     BarColumn,
     Progress,
     SpinnerColumn,
+    TaskID,
     TextColumn,
     TimeElapsedColumn,
     TimeRemainingColumn,
@@ -39,7 +40,7 @@ class RichProgressBar(BuildListener):
             TimeElapsedColumn(),
             TimeRemainingColumn(),
         )
-        self._task: int | None = None
+        self._task: TaskID | None = None
 
     def __enter__(self) -> Self:
         self._progress.start()
@@ -53,7 +54,10 @@ class RichProgressBar(BuildListener):
             "Fetching games", total=total, activity="starting..."
         )
 
-    def event_fetched(self, index, label, activity, complete) -> None:
+    def event_fetched(
+        self, index: int, label: str, activity: str, complete: bool
+    ) -> None:
+        assert self._task is not None
         self._progress.update(
             self._task, advance=1, description=label, activity=f"fetching: {activity}"
         )
