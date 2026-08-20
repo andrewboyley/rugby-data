@@ -22,6 +22,31 @@ Builds dataset of international rugby union matches from ESPN CORE API + World R
 | `just lint-web` | ESLint + fix |
 | `just commit <type> <summary> [body]` | Conventional commit |
 
+## ALWAYS use `just` — never raw build tooling
+
+Invoke **every** project task through a `just` recipe. Do **not** run raw
+`npm` / `uv` / `pip` / `cd web && …` commands for anything that has a `just`
+equivalent — the recipes encode the correct working directory, flags, and
+ordering (e.g. `just web` runs `npm ci && vite build` from inside `web/`).
+The agent has historically bypassed `just` and run manual `npm` commands,
+which drifts from the project's intended workflow; do not do that.
+
+If you reach for one of these, use the `just` form instead:
+
+| Instead of | use |
+|------------|-----|
+| `cd web && npm ci` / `npm install` | `just setup` |
+| `cd web && npm run build` | `just web` |
+| `cd web && npm run dev` | `just dev-start` |
+| `cd web && npm run preview` | `just serve` |
+| `cd web && npm run lint` / `lint:fix` | `just lint-web` |
+| `cd web && npm run typecheck` | `just check-web` |
+| `uv sync` | `just setup` |
+| `uv run …` | the matching `just` recipe (raw `uv run` only when no recipe exists) |
+| `git commit …` | `just commit <type> <summary>` |
+
+Only drop to raw tooling when no `just` recipe exists for the task.
+
 ## Python Package (`src/rugby_composition_predictor/`)
 
 **Entry point:** `rugby_composition_predictor` (via `uv run` or `.venv/bin/`)
