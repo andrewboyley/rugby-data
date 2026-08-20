@@ -19,6 +19,21 @@
     "prune": true,
     "reserved": 12000
   },
+  "permission": {
+    "bash": {
+      "*": "allow",
+      "just *": "allow",
+      "git *": "allow",
+      "cd *web*": "deny",
+      "npm run *": "deny",
+      "pnpm *": "deny",
+      "yarn *": "deny",
+      "npm ci*": "ask",
+      "npm install*": "ask",
+      "npx *": "ask",
+      "uv *": "ask"
+    }
+  },
   "command": {
     "check": {
       "description": "Run all type/lint checks",

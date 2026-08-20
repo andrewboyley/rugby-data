@@ -47,6 +47,11 @@ If you reach for one of these, use the `just` form instead:
 
 Only drop to raw tooling when no `just` recipe exists for the task.
 
+This is also **enforced** in `opencode.json` via permissions: raw
+`cd *web*`, `npm run *`, `pnpm *`, and `yarn *` are denied, and
+`npm ci` / `npm install` / `npx` / `uv` prompt for confirmation. If a command
+is denied, switch to the `just` equivalent rather than working around it.
+
 ## Python Package (`src/rugby_composition_predictor/`)
 
 **Entry point:** `rugby_composition_predictor` (via `uv run` or `.venv/bin/`)
