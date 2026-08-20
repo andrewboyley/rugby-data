@@ -668,7 +668,10 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
             />
 
               <fieldset class="fieldset border border-base-300 rounded-box p-2">
-                <legend class="fieldset-legend text-xs">Options</legend>
+                <legend class="fieldset-legend text-xs flex items-center gap-1">
+                  Options
+                  <span class="badge badge-xs badge-ghost">🔒 = locked from optimizer</span>
+                </legend>
                 <div class="flex flex-col gap-1">
                   {#each [
                     { key: "strongGravityMode", label: "Strong Gravity", title: "Force all nodes toward center regardless of edges" },
@@ -688,6 +691,7 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
                         }} />
                         {item.label}
                       </label>
+                      <button type="button" class="btn btn-xs btn-ghost px-1 min-h-0 h-5 {optimizerState.lockedParams.has(item.key) ? 'text-warning' : 'text-base-content/30'}" onclick={() => handleLockToggle(item.key)} title="Lock from optimizer">{optimizerState.lockedParams.has(item.key) ? '🔒' : '🔓'}</button>
                     </div>
                   {/each}
                 </div>
