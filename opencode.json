@@ -33,23 +33,5 @@
       "npx *": "ask",
       "uv *": "ask"
     }
-  },
-  "command": {
-    "check": {
-      "description": "Run all type/lint checks",
-      "template": "Run `just check-python` and `just check-web`. Report any failures and propose fixes."
-    },
-    "lint": {
-      "description": "Auto-fix lint issues",
-      "template": "Run `just lint-python` and `just lint-web` to apply auto-fixes."
-    },
-    "build": {
-      "description": "Build dataset, graph, and web viewer",
-      "template": "Run `just build` (dataset + graph) then `just web`."
-    },
-    "serve": {
-      "description": "Run the viewer preview server",
-      "template": "Run `just serve` to build and preview on localhost:8787."
-    }
   }
 }

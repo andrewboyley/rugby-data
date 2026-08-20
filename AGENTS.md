@@ -149,9 +149,7 @@ root (safe to commit). It:
   `.venv/`, `.codegraph/`, `.cocoindex_code/`, `data/api_cache.json`,
   `test-results/`) to cut change-notification noise;
 - prunes old tool output during context compaction to keep long sessions
-  within token limits;
-- registers slash commands `/check`, `/lint`, `/build`, `/serve` for the
-  common verify/build loops.
+  within token limits.
 
 When editing this repo, prefer the `just` commands above and the code-intel
 tools (codegraph for structure, chrome-devtools for the running viewer), and
