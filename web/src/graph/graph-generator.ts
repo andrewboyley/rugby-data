@@ -77,11 +77,11 @@ export function generateGraph(spec: GraphSpec): GraphGenResult {
     return mixHexColors(CLUSTER_COLORS[cs % CLUSTER_COLORS.length], CLUSTER_COLORS[ct % CLUSTER_COLORS.length]);
   }
 
-  for (let i = 0; i < nodeCount; i++) {
+for (let i = 0; i < nodeCount; i++) {
     graph.addNode(i, {
       x: rand(),
       y: rand(),
-      size: 0.02 + rand() * 0.015,
+      size: 0.015,
       color: clusterColor(i),
     });
   }
@@ -115,6 +115,23 @@ export function generateGraph(spec: GraphSpec): GraphGenResult {
       }
     }
   }
+
+  // Set node sizes based on degree
+  const minSize = 0.015;
+  const maxSize = 0.05;
+  let minDegree = Infinity;
+  let maxDegree = -Infinity;
+  graph.forEachNode((id) => {
+    const deg = graph.degree(id);
+    if (deg < minDegree) minDegree = deg;
+    if (deg > maxDegree) maxDegree = deg;
+  });
+  const degreeSpan = maxDegree - minDegree || 1;
+  graph.forEachNode((id) => {
+    const deg = graph.degree(id);
+    const norm = (deg - minDegree) / degreeSpan;
+    graph.setNodeAttribute(id, "size", minSize + norm * (maxSize - minSize));
+  });
 
   assignUnitCircle(graph);
   return {
