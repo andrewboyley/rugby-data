@@ -46,8 +46,8 @@ const initialState: UIState = {
   showTrails: false,
   trailOpacity: 0.55,
   enforceBounds: true,
-  boundsMaxX: 400,
-  boundsMaxY: 300,
+  boundsMaxX: 0.4,
+  boundsMaxY: 0.3,
   storageKey: "rugby-fa2-settings",
 };
 
@@ -69,8 +69,8 @@ export function resetUIState() {
   uiState.showTrails = false;
   uiState.trailOpacity = 0.55;
   uiState.enforceBounds = true;
-  uiState.boundsMaxX = 400;
-  uiState.boundsMaxY = 300;
+  uiState.boundsMaxX = 0.4;
+  uiState.boundsMaxY = 0.3;
 }
 
 export function setGraph(graph: Graph | null) {

@@ -89,10 +89,10 @@ export class LayoutController {
     this.graph.forEachNode((_node: string, attrs: Record<string, unknown>) => {
       const x = attrs.x as number;
       const y = attrs.y as number;
-      if (x > this.boundsMaxX) attrs.x = this.boundsMaxX;
-      else if (x < -this.boundsMaxX) attrs.x = -this.boundsMaxX;
-      if (y > this.boundsMaxY) attrs.y = this.boundsMaxY;
-      else if (y < -this.boundsMaxY) attrs.y = -this.boundsMaxY;
+      if (x > 0.5 + this.boundsMaxX) attrs.x = 0.5 + this.boundsMaxX;
+      else if (x < 0.5 - this.boundsMaxX) attrs.x = 0.5 - this.boundsMaxX;
+      if (y > 0.5 + this.boundsMaxY) attrs.y = 0.5 + this.boundsMaxY;
+      else if (y < 0.5 - this.boundsMaxY) attrs.y = 0.5 - this.boundsMaxY;
     });
   }
 

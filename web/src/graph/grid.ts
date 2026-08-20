@@ -71,33 +71,34 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
     const visMaxY = Math.max(tl.y, br.y);
 
     // Grid step adapts to zoom: keep ~14 cells across the visible viewport, so
-    // zooming out yields fewer, larger cells (and zooming in finer ones).
-    const stepX = niceStep((visMaxX - visMinX) / 14);
-    const stepY = niceStep((visMaxY - visMinY) / 14);
+    // zooming out yields fewer, larger cells (and zooming in finer ones). A
+    // single step is used for both axes (derived from the larger span) so the
+    // cells are always square; sigma scales x and y uniformly, so one
+    // world-space step maps to the same pixel distance on both axes.
+    const step = niceStep(Math.max(visMaxX - visMinX, visMaxY - visMinY) / 14);
 
     const toX = (wx: number) => sigma.graphToViewport({ x: wx, y: 0 }).x;
     const toY = (wy: number) => sigma.graphToViewport({ x: 0, y: wy }).y;
 
-    const screenStepX = Math.abs(toX(stepX) - toX(0));
-    const screenStepY = Math.abs(toY(stepY) - toY(0));
+    const screenStep = Math.abs(toX(step) - toX(0));
 
     ctx.strokeStyle = stroke;
     ctx.lineWidth = 1;
     ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
     ctx.textBaseline = "alphabetic";
 
-    for (let wx = Math.floor(visMinX / stepX) * stepX; wx <= visMaxX; wx += stepX) {
+    for (let wx = Math.floor(visMinX / step) * step; wx <= visMaxX; wx += step) {
       const sx = toX(wx);
       ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, cssH); ctx.stroke();
-      if (screenStepX >= 36) {
+      if (screenStep >= 36) {
         ctx.fillStyle = label;
         ctx.fillText(formatCoord(wx), sx + 3, cssH - 4);
       }
     }
-    for (let wy = Math.floor(visMinY / stepY) * stepY; wy <= visMaxY; wy += stepY) {
+    for (let wy = Math.floor(visMinY / step) * step; wy <= visMaxY; wy += step) {
       const sy = toY(wy);
       ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(cssW, sy); ctx.stroke();
-      if (screenStepY >= 36) {
+      if (screenStep >= 36) {
         ctx.fillStyle = label;
         ctx.fillText(formatCoord(wy), 3, sy - 3);
       }
@@ -105,9 +106,9 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
 
     const bounds = opts.getBounds?.();
     if (bounds) {
-      // Bounds box is centered on the origin (0, 0).
-      const p1 = sigma.graphToViewport({ x: -bounds.maxX, y: -bounds.maxY });
-      const p2 = sigma.graphToViewport({ x: bounds.maxX, y: bounds.maxY });
+      // Bounds box is centered on the unit graph center (0.5, 0.5).
+      const p1 = sigma.graphToViewport({ x: 0.5 - bounds.maxX, y: 0.5 - bounds.maxY });
+      const p2 = sigma.graphToViewport({ x: 0.5 + bounds.maxX, y: 0.5 + bounds.maxY });
       ctx.setLineDash([5, 5]);
       ctx.strokeStyle = "rgba(255,0,0,0.4)";
       ctx.strokeRect(p1.x, p1.y, p2.x - p1.x, p2.y - p1.y);

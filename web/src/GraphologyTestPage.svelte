@@ -718,18 +718,18 @@ import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
               <fieldset class="fieldset border border-base-300 rounded-box p-2">
                 <legend class="fieldset-legend text-xs">Bounds · dashed = clamp box</legend>
                 <div class="flex flex-col gap-1.5">
-                  <label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer" title="Clamp every node to ± half-width on each axis each layout tick">
+                  <label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer" title="Clamp every node to 0.5 ± half-width on each axis each layout tick">
                     <input type="checkbox" bind:checked={uiState.enforceBounds} class="checkbox checkbox-xs" />
                     Clamp to box
                   </label>
-                  <label class="flex items-center gap-2 text-xs font-mono" title="Half-width — nodes clamped to ± this (origin-centered)">
+                  <label class="flex items-center gap-2 text-xs font-mono" title="Half-width — nodes clamped to 0.5 ± this">
                     <span class="w-14 shrink-0 opacity-70">Half-w</span>
-                    <input type="range" min="50" max="2000" step="50" bind:value={uiState.boundsMaxX} class="range range-xs flex-1" disabled={!uiState.enforceBounds} />
+                    <input type="range" min="0.05" max="0.5" step="0.05" bind:value={uiState.boundsMaxX} class="range range-xs flex-1" disabled={!uiState.enforceBounds} />
                     <span class="w-10 text-right shrink-0">{uiState.boundsMaxX}</span>
                   </label>
-                  <label class="flex items-center gap-2 text-xs font-mono" title="Half-height — nodes clamped to ± this (origin-centered)">
+                  <label class="flex items-center gap-2 text-xs font-mono" title="Half-height — nodes clamped to 0.5 ± this">
                     <span class="w-14 shrink-0 opacity-70">Half-h</span>
-                    <input type="range" min="50" max="1500" step="50" bind:value={uiState.boundsMaxY} class="range range-xs flex-1" disabled={!uiState.enforceBounds} />
+                    <input type="range" min="0.05" max="0.5" step="0.05" bind:value={uiState.boundsMaxY} class="range range-xs flex-1" disabled={!uiState.enforceBounds} />
                     <span class="w-10 text-right shrink-0">{uiState.boundsMaxY}</span>
                   </label>
                 </div>

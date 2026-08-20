@@ -18,9 +18,10 @@ export interface GraphGenResult {
 
 const MAX_EDGES = 15000;
 
-// Graphology circular layout options producing a circle of radius 100 centered
-// on the origin (0, 0): center 0.5 yields offset (0.5 - 0.5) * scale = 0.
-export const UNIT_CIRCLE_OPTIONS = { scale: 100, center: 0.5 } as const;
+// Graphology circular layout options producing a unit circle inscribed in the
+// normalized [0, 1] square (sigma v4 "framedGraph" space): scale 0.5 gives a
+// radius of 0.5 and center 1.5 shifts the offset so positions land in [0, 1].
+export const UNIT_CIRCLE_OPTIONS = { scale: 0.5, center: 1.5 } as const;
 
 export function assignUnitCircle(graph: Graph): void {
   circular.assign(graph, UNIT_CIRCLE_OPTIONS);
