@@ -1,573 +1,878 @@
 <script lang="ts">
-	import { onDestroy, untrack } from "svelte";
-	import { push } from "svelte-spa-router";
-	import Graph from "graphology";
-	import { circular } from "graphology-layout";
-	import forceAtlas2 from "graphology-layout-forceatlas2";
-import Sigma from "sigma";
-import { sdfCircle } from "sigma/rendering";
-	import louvain from "graphology-communities-louvain";
-	import { getCameraStateToFitViewportToNodes } from "@sigma/utils";
-	import LiveViewPanel from "./LiveViewPanel.svelte";
-	import type { LayoutTickStats } from "./graph/layout";
+  import { onMount, onDestroy, untrack } from "svelte";
+  import Graph from "graphology";
+  import { circular } from "graphology-layout";
+  import forceAtlas2 from "graphology-layout-forceatlas2";
+  import Sigma from "sigma";
+  import { sdfCircle } from "sigma/rendering";
+  import { getCameraStateToFitViewportToNodes } from "@sigma/utils";
+  import LiveViewPanel from "./LiveViewPanel.svelte";
+  import ScorePlot, { type PlotSeries } from "./ScorePlot.svelte";
+  import DebugOverlay from "./DebugOverlay.svelte";
+  import ParamControls from "./components/ParamControls.svelte";
+  import FeatureTooltip from "./components/FeatureTooltip.svelte";
+  import type { FA2Params, HeuristicWeights } from "./graph/layout-optimizer";
+import { LayoutController } from "./graph";
+import { LayoutTrainer } from "./graph";
+import { FA2OptimizerAdapter } from "./graph";
+import { generateGraph, estimateEdges, clampNodeCount, MAX_EDGES, savePositions } from "./graph";
+import { layoutState, startLayout as startLayoutStore, stopLayout as stopLayoutStore, resetLayoutState, recordTick, setHeuristicFeatures, setPreviousPositions } from "./stores/layout-store.svelte";
+import { optimizerState, setAutoTune, setEpisodeLength, setWeights, setSigns, toggleIgnoreWeight, toggleLock, setLockedParams, updateTrainerStats, addEpisodeMean } from "./stores/optimizer-store.svelte";
+import { uiState, setGraph, setSettingsTab, setBottomTab, toggleBottomOpen, setNodeCount, setClusterCount, setDegreeRatio, setUseFixedSeed, setFixedSeed, setAutoFit, setShowGrid, setShowTrails, setTrailOpacity, setEnforceBounds, setBoundsMaxX, setBoundsMaxY } from "./stores/ui-store.svelte";
+import { createGridOverlay, type GridOverlay } from "./graph/grid.ts";
 
-	const CHUNK_SIZE = 20;
-	const CLUSTER_COLORS = [
-		"#e03131", "#1971c2", "#40c057", "#fa923f",
-		"#862e9c", "#e8590c", "#109868", "#0b7285",
-		"#c2255c", "#5c940d", "#9c36b5", "#e67700",
-	];
+  const CLUSTER_COLORS = [
+    "#e03131", "#1971c2", "#40c057", "#fa923f",
+    "#862e9c", "#e8590c", "#109868", "#0b7285",
+    "#c2255c", "#5c940d", "#9c36b5", "#e67700",
+  ];
 
-	async function goHome() { await push("/"); }
+  const CONTEXT_DIM = 4;
+  const FRAME_BUDGET_MS = 8;
 
-	let nodeCount = $state(200);
-	let clusterCount = $state(10);
-	let clusterStrength = $state(3);
-	let seed = $state(42);
-	let intraClusterOnly = $state(true);
-	let degreeRatio = $state(0.3);
-	let autoFit = $state(true);
-	let showGrid = $state(true);
-	let settingsTab = $state<"graph" | "fa2">("graph");
-	let sidebarOpen = $state(true);
-	let bottomOpen = $state(true);
-	let suppressCameraUpdate = false;
+  function goHome() { window.location.href = "/"; }
 
-	let fa2Settings = $state({
-		gravity: 1,
-		slowDown: 1,
-		scalingRatio: 10,
-		strongGravityMode: false,
-		barnesHutOptimize: true,
-		barnesHutTheta: 0.5,
-		edgeWeightInfluence: 1,
-		outboundAttractionDistribution: false,
-		linLogMode: false,
-		adjustSizes: false,
-	});
+  let host: HTMLElement | null = null;
+  let sigmaInstance: Sigma | null = null;
+  let grid: GridOverlay | null = null;
+  let containerObserver: ResizeObserver | null = null;
+  let previewGraph: Graph | null = null;
+  let isFirstAttach = true;
+  let rafId: number | null = null;
+  let trailCanvas: HTMLCanvasElement | null = null;
+  let showTrails = false;
+  let trailOpacity = 0.55;
+  let trailHistory = new Map<string, { x: number; y: number }[]>();
+  let focusSet = new Set<string>();
+  let suppressCameraUpdate = false;
+  let sidebarOpen = $state(true);
+  let debugOverlayVisible = false;
 
-	let layoutRunning = $state(false);
-	let iterations = $state(0);
-	let layoutQuality = $state(0);
+  let layoutController: LayoutController | null = null;
+  let trainer: LayoutTrainer | null = null;
+  let optimizer = new FA2OptimizerAdapter(true);
 
-	let host = $state<HTMLDivElement | null>(null);
-	let gridCanvas = $state<HTMLCanvasElement | null>(null);
-	let sigmaInstance: Sigma | null = null;
-	let containerObserver: ResizeObserver | null = null;
-	let currentGraph: Graph | null = null;
-	let rafId: number | null = null;
+  function handleAutoTuneToggle() {
+    const next = !optimizerState.autoTune;
+    setAutoTune(next);
+    if (next && layoutState.running) {
+      optimizer.start({ ...getCurrentFA2Settings() }, optimizerState.lockedParams);
+      optimizerState.optimState = optimizer.getSnapshot();
+      trainer?.start();
+    } else if (!next) {
+      trainer?.stop();
+    }
+  }
 
-	let tickStats = $state<LayoutTickStats[]>([]);
-	let previousPositions = new Map<string, { x: number; y: number }>();
+  function handleLockToggle(key: keyof FA2Params) {
+    toggleLock(key);
+    if (optimizerState.autoTune && optimizer.isCalibrated()) {
+      optimizer.retarget({ ...getCurrentFA2Settings() }, optimizerState.lockedParams, CONTEXT_DIM);
+    }
+  }
 
-	function fitCamera(animate = true) {
-		if (!sigmaInstance || !currentGraph || currentGraph.order === 0) return;
-		const nodeKeys: string[] = [];
-		currentGraph.forEachNode((id) => nodeKeys.push(id));
-		const state = getCameraStateToFitViewportToNodes(sigmaInstance, nodeKeys);
-		suppressCameraUpdate = true;
-		if (animate) {
-			sigmaInstance.getCamera().animate({ ...state }, {}).then(() => { suppressCameraUpdate = false; });
-		} else {
-			sigmaInstance.getCamera().setState({ ...state });
-			suppressCameraUpdate = false;
-		}
-	}
+  // Derived values for graph generation
+  const estEdgeCount = $derived.by(() => estimateEdges({
+    nodeCount: uiState.nodeCount,
+    clusterCount: uiState.clusterCount,
+    degreeRatio: uiState.degreeRatio,
+    seed: uiState.fixedSeed,
+  }));
 
-	function drawGrid() {
-		const c = gridCanvas;
-		if (!c || !sigmaInstance) return;
-		const ctx = c.getContext("2d");
-		if (!ctx) return;
-		const dpr = devicePixelRatio || 1;
-		const cssW = c.width / dpr, cssH = c.height / dpr;
-		const cam = sigmaInstance.getCamera();
-		const ratio = cam.ratio;
-		const cx = cam.x, cy = cam.y;
-		const spacing = Math.pow(2, Math.ceil(Math.log2(ratio * 60)));
-		ctx.clearRect(0, 0, c.width, c.height);
-		if (!untrack(() => showGrid)) return;
-		const halfW = (cssW / 2) * ratio;
-		const halfH = (cssH / 2) * ratio;
-		const graphLeft = cx - halfW;
-		const graphRight = cx + halfW;
-		const graphTop = cy - halfH;
-		const graphBottom = cy + halfH;
-		const firstX = Math.floor(graphLeft / spacing) * spacing;
-		const firstY = Math.floor(graphTop / spacing) * spacing;
-		ctx.strokeStyle = "rgba(128,128,128,0.15)";
-		ctx.lineWidth = 1;
-		ctx.beginPath();
-		for (let gx = firstX; gx <= graphRight; gx += spacing) {
-			const sx = ((gx - cx) / ratio + cssW / 2) * dpr;
-			ctx.moveTo(sx, 0);
-			ctx.lineTo(sx, c.height);
-		}
-		for (let gy = firstY; gy <= graphBottom; gy += spacing) {
-			const sy = ((gy - cy) / ratio + cssH / 2) * dpr;
-			ctx.moveTo(0, sy);
-			ctx.lineTo(c.width, sy);
-		}
-		ctx.stroke();
-	}
+  // Clamp node count when params change
+  $effect(() => {
+    const clamped = clampNodeCount({
+      nodeCount: uiState.nodeCount,
+      clusterCount: uiState.clusterCount,
+      degreeRatio: uiState.degreeRatio,
+      seed: uiState.fixedSeed,
+    });
+    if (clamped.nodeCount !== uiState.nodeCount) {
+      setNodeCount(clamped.nodeCount);
+    }
+  });
 
-	function savePositions() {
-		const map = new Map<string, { x: number; y: number }>();
-		if (!currentGraph) return map;
-		currentGraph.forEachNode((id, attrs) => {
-			const a = attrs as { x: number; y: number };
-			map.set(id, { x: a.x, y: a.y });
-		});
-		return map;
-	}
+  // Update optimizer weights when they change during auto-tune
+  $effect(() => {
+    if (optimizerState.autoTune) {
+      optimizer.setWeights(effectiveWeights());
+      optimizer.setSigns({ ...optimizerState.signs });
+    }
+  });
 
-	function computeTickStats(prev: Map<string, { x: number; y: number }>): LayoutTickStats | null {
-		if (!currentGraph || currentGraph.order === 0 || prev.size === 0) return null;
-		let totalDisp = 0, maxDisp = 0, sumSqDisp = 0, count = 0;
-		currentGraph.forEachNode((id, attrs) => {
-			const a = attrs as { x: number; y: number };
-			const p = prev.get(id);
-			if (p) {
-				const dx = a.x - p.x, dy = a.y - p.y;
-				const d = Math.sqrt(dx * dx + dy * dy);
-				totalDisp += d; sumSqDisp += d * d;
-				if (d > maxDisp) maxDisp = d;
-				count++;
-			}
-		});
-		if (count === 0) return null;
-		const mean = totalDisp / count;
-		const variance = count > 1 ? sumSqDisp / count - mean * mean : 0;
-		return {
-			timestamp: performance.now(),
-			meanDisplacement: mean,
-			maxDisplacement: maxDisp,
-			stdDisplacement: Math.sqrt(Math.max(0, variance)),
-			kineticEnergy: totalDisp,
-			nodeCount: currentGraph.order,
-			settledProgress: 1 - Math.min(1, mean),
-		};
-	}
+  // Persist UI settings
+  $effect(() => {
+    try {
+      const data = {
+        fa2Settings: {
+          gravity: optimizerState.optimState?.bestParams?.gravity ?? 1,
+          slowDown: optimizerState.optimState?.bestParams?.slowDown ?? 1,
+          scalingRatio: optimizerState.optimState?.bestParams?.scalingRatio ?? 10,
+          strongGravityMode: optimizerState.optimState?.bestParams?.strongGravityMode ?? false,
+          barnesHutOptimize: optimizerState.optimState?.bestParams?.barnesHutOptimize ?? true,
+          barnesHutTheta: optimizerState.optimState?.bestParams?.barnesHutTheta ?? 0.5,
+          edgeWeightInfluence: optimizerState.optimState?.bestParams?.edgeWeightInfluence ?? 1,
+          outboundAttractionDistribution: optimizerState.optimState?.bestParams?.outboundAttractionDistribution ?? false,
+          linLogMode: optimizerState.optimState?.bestParams?.linLogMode ?? false,
+          adjustSizes: optimizerState.optimState?.bestParams?.adjustSizes ?? false,
+        },
+        lockedParams: Array.from(optimizerState.lockedParams),
+        episodeLength: optimizerState.episodeLength,
+        heuristicWeights: optimizerState.weights,
+        weightSigns: optimizerState.signs,
+        ignoreWeights: optimizerState.ignoreWeights,
+        nodeCount: uiState.nodeCount,
+        clusterCount: uiState.clusterCount,
+        degreeRatio: uiState.degreeRatio,
+        useFixedSeed: true,
+        fixedSeed: uiState.fixedSeed,
+        autoFit: uiState.autoFit,
+        showGrid: uiState.showGrid,
+        showTrails: uiState.showTrails,
+        trailOpacity: uiState.trailOpacity,
+        enforceBounds: uiState.enforceBounds,
+        boundsMaxX: uiState.boundsMaxX,
+        boundsMaxY: uiState.boundsMaxY,
+      };
+      localStorage.setItem(uiState.storageKey, JSON.stringify(data));
+    } catch { /* ignore */ }
+  });
 
-	function destroySigma() {
-		if (gridRafId) { cancelAnimationFrame(gridRafId); gridRafId = null; }
-		if (containerObserver) { containerObserver.disconnect(); containerObserver = null; }
-		if (sigmaInstance) { sigmaInstance.kill(); sigmaInstance = null; }
-	}
+  // Load settings on mount
+  onMount(() => {
+    try {
+      const raw = localStorage.getItem(uiState.storageKey);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (data.fa2Settings) {
+          // Settings are applied via optimizer state
+        }
+        if (data.lockedParams) setLockedParams(new Set(data.lockedParams));
+        if (data.episodeLength) setEpisodeLength(data.episodeLength);
+        if (data.heuristicWeights) setWeights(data.heuristicWeights);
+        if (data.weightSigns) setSigns(data.weightSigns);
+        if (data.ignoreWeights) {
+          for (const [k, v] of Object.entries(data.ignoreWeights)) {
+            if (v !== optimizerState.ignoreWeights[k as keyof HeuristicWeights]) {
+              toggleIgnoreWeight(k as keyof HeuristicWeights);
+            }
+          }
+        }
+        if (data.nodeCount) setNodeCount(data.nodeCount);
+        if (data.clusterCount) setClusterCount(data.clusterCount);
+        if (data.degreeRatio) setDegreeRatio(data.degreeRatio);
+        if (data.fixedSeed) setFixedSeed(data.fixedSeed);
+        
+        if (data.autoFit !== undefined) setAutoFit(data.autoFit);
+        if (data.showGrid !== undefined) setShowGrid(data.showGrid);
+        if (data.showTrails !== undefined) setShowTrails(data.showTrails);
+        if (data.trailOpacity !== undefined) setTrailOpacity(data.trailOpacity);
+        if (data.enforceBounds !== undefined) setEnforceBounds(data.enforceBounds);
+        if (data.boundsMaxX !== undefined) setBoundsMaxX(data.boundsMaxX);
+        if (data.boundsMaxY !== undefined) setBoundsMaxY(data.boundsMaxY);
+      }
+    } catch { /* ignore */ }
+  });
 
-	let gridRafId: number | null = null;
-	function startGridLoop() {
-		if (gridRafId) cancelAnimationFrame(gridRafId);
-		const tick = () => {
-			if (sigmaInstance) drawGrid();
-			gridRafId = requestAnimationFrame(tick);
-		};
-		gridRafId = requestAnimationFrame(tick);
-	}
+  // Clear cache on fresh load (for development)
+  localStorage.removeItem(uiState.storageKey);
 
-// Create the Sigma renderer exactly once. Every subsequent parameter change
-// swaps the graph data via setGraph() instead of tearing down and rebuilding
-// the WebGL context — so there is never more than one context and no
-// "allocate" exhaustion error, even when the slider is dragged rapidly.
-function ensureSigma() {
-	if (sigmaInstance || !host) return;
-	const empty = new Graph({ multi: false });
-	const s = new Sigma(empty, host, {
-		primitives: { nodes: { shapes: [sdfCircle()] } },
-		styles: {
-			nodes: [{ color: { attribute: "color" }, size: { attribute: "size" } }],
-			edges: [{ color: "#888" }],
-		},
-		settings: { allowInvalidContainer: true, itemSizesReference: "screen" },
-	});
-	sigmaInstance = s;
-	(window as any).__sigma = s;
-	s.getCamera().addListener("updated", () => {
-		drawGrid();
-		if (!suppressCameraUpdate && untrack(() => autoFit)) autoFit = false;
-	});
-	s.addListener("afterRender", () => { drawGrid(); });
-	containerObserver = new ResizeObserver(() => {
-		if (untrack(() => autoFit && !layoutRunning && sigmaInstance === s)) {
-			requestAnimationFrame(() => {
-				suppressCameraUpdate = true;
-				s.resize();
-				s.refresh();
-				fitCamera(false);
-				suppressCameraUpdate = false;
-			});
-		}
-	});
-	containerObserver.observe(host);
-	startGridLoop();
-}
+  // Initialize sigma and build the initial graph
+  ensureSigma();
+  rebuildGraph();
 
-function rebuildGraph() {
-	if (!host) return;
-	ensureSigma();
-	if (!sigmaInstance) return;
+  function rebuildGraph() {
+    const { graph, maxEdgesExceeded } = generateGraph({
+      nodeCount: uiState.nodeCount,
+      clusterCount: uiState.clusterCount,
+      degreeRatio: uiState.degreeRatio,
+      seed: uiState.useFixedSeed ? uiState.fixedSeed : Math.floor(Math.random() * 1e9),
+    });
 
-	const g = new Graph({ multi: false });
-	const rng = mulberry32(seed);
-	const baseSize = Math.max(1, Math.min(20, 120 / Math.sqrt(nodeCount)));
-	const nodeList: { id: string; cluster: number }[] = [];
-	const clusterSizes = new Array(clusterCount).fill(0);
-	for (let i = 0; i < nodeCount; i++) {
-		const cluster = Math.floor(rng() * clusterCount);
-		clusterSizes[cluster]++;
-		nodeList.push({ id: `n${i}`, cluster });
-		g.addNode(`n${i}`, { cluster, size: baseSize, color: CLUSTER_COLORS[cluster % CLUSTER_COLORS.length] });
-	}
-	const targetDegree = new Array(nodeCount);
-	for (let i = 0; i < nodeList.length; i++) {
-		const c = nodeList[i].cluster;
-		const poolSize = intraClusterOnly ? clusterSizes[c] - 1 : nodeCount - 1;
-		targetDegree[i] = Math.round(poolSize * degreeRatio);
-	}
+    setGraph(graph);
 
-	const existingEdges: [number, number][] = [];
-	const degree = new Array(nodeCount).fill(0);
+    if (layoutController) {
+      layoutController.updateSettings(optimizerState.optimState?.bestParams ?? {
+        gravity: 1, slowDown: 1, scalingRatio: 10, strongGravityMode: false,
+        barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1,
+        outboundAttractionDistribution: false, linLogMode: false, adjustSizes: false,
+      });
+      layoutController.updateBounds(uiState.enforceBounds, uiState.boundsMaxX, uiState.boundsMaxY);
+    }
 
-	for (let i = 0; i < nodeCount; i++) {
-		const candidates: number[] = [];
-		for (let j = 0; j < nodeCount; j++) {
-			if (i === j) continue;
-			const sameCluster = nodeList[i].cluster === nodeList[j].cluster;
-			if (intraClusterOnly && !sameCluster) continue;
-			candidates.push(j);
-		}
-		for (let c = candidates.length - 1; c > 0; c--) {
-			const r = Math.floor(rng() * (c + 1));
-			[candidates[c], candidates[r]] = [candidates[r], candidates[c]];
-		}
-		const need = Math.max(0, targetDegree[i] - degree[i]);
-		for (let k = 0; k < need && k < candidates.length; k++) {
-			const j = candidates[k];
-			if (degree[j] >= targetDegree[j]) continue;
-			const existing = existingEdges.some(([a, b]) => (a === i && b === j) || (a === j && b === i));
-			if (existing) continue;
-			const w = 0.1 + normalSample(rng, 1, 0.5);
-			g.addEdge(nodeList[i].id, nodeList[j].id, { weight: w });
-			existingEdges.push([i, j]);
-			degree[i]++;
-			degree[j]++;
-		}
-	}
-	circular.assign(g, { scale: 100 });
-	currentGraph = g;
+    if (trainer) {
+      trainer.stop();
+    }
 
-	sigmaInstance.setGraph(g);
-	suppressCameraUpdate = true;
-	sigmaInstance.resize();
-	if (untrack(() => autoFit)) fitCamera(false);
-	suppressCameraUpdate = false;
-	sigmaInstance.refresh({ skipIndexation: true });
-}
+    // Reset layout state
+    resetLayoutState();
+    optimizerState.currentEpisodeParams = null;
+    optimizerState.optimState = null;
+    optimizerState.episodeMeans = [];
+    optimizerState.episodeItersPerSec = [];
 
-	$effect(() => {
-		const _n = nodeCount, _c = clusterCount, _s = clusterStrength, _sd = seed, _ic = intraClusterOnly, _dr = degreeRatio, _h = host;
-		void _n; void _c; void _s; void _sd; void _ic; void _dr; void _h;
-		rebuildGraph();
-	});
+    // Recreate layout controller with new graph
+    layoutController = new LayoutController({
+      graph,
+      settings: optimizerState.optimState?.bestParams ?? {
+        gravity: 1, slowDown: 1, scalingRatio: 10, strongGravityMode: false,
+        barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1,
+        outboundAttractionDistribution: false, linLogMode: false, adjustSizes: false,
+      },
+      enforceBounds: uiState.enforceBounds,
+      boundsMaxX: uiState.boundsMaxX,
+      boundsMaxY: uiState.boundsMaxY,
+      optimizer: { featureView: (stat) => optimizer.featureView(stat) },
+    });
 
-	$effect(() => {
-		if (autoFit) fitCamera(true);
-	});
+    // Recreate trainer
+    trainer = new LayoutTrainer({
+      graph,
+      optimizer,
+      controller: layoutController,
+      callbacks: {
+        onEpisodeComplete: (params, reward, context) => {
+          addEpisodeMean(reward);
+        },
+        onEpisodeStart: (params) => {
+          optimizerState.currentEpisodeParams = params;
+        },
+        onIteration: (stat) => {
+          // Stats updated by trainer
+        },
+        onStatsUpdate: (stats) => {
+          updateTrainerStats(stats);
+        },
+      },
+      frameBudgetMs: FRAME_BUDGET_MS,
+      getIterBudget: () => Math.max(1, Math.round(optimizerState.episodeLength * 1000 / 16)),
+      getEpisodeContext: () => layoutState.lastStat
+        ? [layoutState.lastStat.edgeLengthCV, layoutState.lastStat.aspectRatio, layoutState.lastStat.motion, layoutState.lastStat.centerDistRatio ?? 0]
+        : null,
+      isRunning: () => layoutState.running,
+      isAutoTune: () => optimizerState.autoTune,
+      getCurrentEpisodeParams: () => optimizerState.currentEpisodeParams,
+      setCurrentEpisodeParams: (params) => { optimizerState.currentEpisodeParams = params; },
+    });
 
-	$effect(() => {
-		const c = gridCanvas;
-		const h = host;
-		if (!c || !h) return;
-		const ro = new ResizeObserver((entries) => {
-			for (const e of entries) {
-				const { width, height } = e.contentRect;
-				c.width = width * devicePixelRatio;
-				c.height = height * devicePixelRatio;
-				c.style.width = width + "px";
-				c.style.height = height + "px";
-			}
-		});
-		ro.observe(h);
-		return () => ro.disconnect();
-	});
+    // Reset to circle and update sigma
+    circular.assign(graph, { scale: 100 });
+    const positions = savePositions(graph);
+    setPreviousPositions(positions);
+    if (layoutController) layoutController.setPreviousPositions(positions);
 
-	function startLayout() {
-		if (!currentGraph || layoutRunning) return;
-		layoutRunning = true;
-		iterations = 0;
-		layoutQuality = 0;
-		tickStats = [];
-		previousPositions = savePositions();
-		runLayoutChunk();
-	}
+    if (sigmaInstance) {
+      sigmaInstance.setGraph(graph);
+      sigmaInstance.refresh({ skipIndexation: true });
+      freezeGridBBox();
+    }
+    attachPreviewGraph();
+  }
 
-	function runLayoutChunk() {
-		if (!layoutRunning || !currentGraph) return;
-		const prev = previousPositions;
-		forceAtlas2.assign(currentGraph, { iterations: CHUNK_SIZE, settings: { ...fa2Settings } });
-		iterations += CHUNK_SIZE;
-		const stat = computeTickStats(prev);
-		if (stat) tickStats = [...tickStats, stat];
-		previousPositions = savePositions();
-		if (iterations % 100 === 0) updateQuality();
-		if (sigmaInstance) sigmaInstance.refresh({ skipIndexation: true });
+  function attachPreviewGraph(forceCircle = false) {
+    if (!sigmaInstance || !uiState.currentGraph) return;
+    if (forceCircle || isFirstAttach) {
+      isFirstAttach = false;
+      circular.assign(uiState.currentGraph, { scale: 100 });
+    }
+    // Build preview graph with best params (or current settings when not auto-tuning)
+    const params = getCurrentFA2Settings();
+    const preview = buildPreviewGraphFn(params, forceCircle ? 0 : 800);
+    if (preview) {
+      previewGraph = preview;
+      sigmaInstance.setGraph(previewGraph);
+      sigmaInstance.refresh({ skipIndexation: true });
+      freezeGridBBox();
+    }
+  }
 
-		if (layoutRunning) rafId = requestAnimationFrame(runLayoutChunk);
-	}
+  function startLayoutFn() {
+    if (!uiState.currentGraph || layoutState.running) return;
+    startLayoutStore();
+    optimizer.setWeights(effectiveWeights());
+    optimizer.setSigns({ ...optimizerState.signs });
+    if (optimizerState.autoTune) {
+      optimizerState.episodeMeans = [];
+      optimizerState.episodeItersPerSec = [];
+      optimizer.start({ ...getCurrentFA2Settings() }, optimizerState.lockedParams);
+      optimizerState.optimState = optimizer.getSnapshot();
+      trainer?.start();
+    }
+    runLayoutChunk();
+  }
 
-	function stopLayout() {
-		layoutRunning = false;
-		if (rafId) cancelAnimationFrame(rafId);
-		rafId = null;
-		requestAnimationFrame(() => fitCamera(true));
-	}
+  function stopLayoutFn() {
+    stopLayoutStore();
+    trainer?.stop();
+    if (uiState.currentGraph) {
+      circular.assign(uiState.currentGraph, { scale: 100 });
+      const positions = savePositions(uiState.currentGraph);
+      setPreviousPositions(positions);
+      if (layoutController) layoutController.setPreviousPositions(positions);
+    }
+    attachPreviewGraph();
+  }
 
-	function updateQuality() {
-		if (!currentGraph) return;
-		try {
-			const g = currentGraph;
-			const communities = louvain(g, { getEdgeWeight: "weight", resolution: 1 });
-			let modularity = 0;
-			const m = g.size;
-			if (m > 0) {
-				for (const edge of g.edges()) {
-					const [u, v] = g.extremities(edge);
-					const w = g.getEdgeAttribute(edge, "weight") as number || 1;
-					let ku = 0, kv = 0;
-					g.forEachEdge(u, (_e) => { ku += g.getEdgeAttribute(_e, "weight") as number || 1; });
-					g.forEachEdge(v, (_e) => { kv += g.getEdgeAttribute(_e, "weight") as number || 1; });
-					if (communities[u] === communities[v]) modularity += w - (ku * kv) / (2 * m);
-				}
-				modularity /= (2 * m);
-			}
-			layoutQuality = modularity;
-		} catch { layoutQuality = 0; }
-	}
+  function resetAll() {
+    stopLayoutFn();
+    setAutoTune(false);
+    optimizerState.currentEpisodeParams = null;
+    optimizerState.optimState = null;
+    optimizerState.trainerStats = {
+      totalEpisodes: 0,
+      episodesPerSec: 0,
+      lastEpisodeReward: 0,
+      bestReward: -Infinity,
+      trainingTime: 0,
+      iterationsPerSec: 0,
+    };
+    if (uiState.currentGraph) {
+      circular.assign(uiState.currentGraph, { scale: 100 });
+      const positions = savePositions(uiState.currentGraph);
+      setPreviousPositions(positions);
+      if (layoutController) layoutController.setPreviousPositions(positions);
+    }
+    attachPreviewGraph();
+  }
 
-	onDestroy(() => { stopLayout(); destroySigma(); });
+  function getCurrentFA2Settings(): FA2Params {
+    return {
+      gravity: optimizerState.optimState?.bestParams?.gravity ?? 1,
+      slowDown: optimizerState.optimState?.bestParams?.slowDown ?? 1,
+      scalingRatio: optimizerState.optimState?.bestParams?.scalingRatio ?? 10,
+      strongGravityMode: optimizerState.optimState?.bestParams?.strongGravityMode ?? false,
+      barnesHutOptimize: optimizerState.optimState?.bestParams?.barnesHutOptimize ?? true,
+      barnesHutTheta: optimizerState.optimState?.bestParams?.barnesHutTheta ?? 0.5,
+      edgeWeightInfluence: optimizerState.optimState?.bestParams?.edgeWeightInfluence ?? 1,
+      outboundAttractionDistribution: optimizerState.optimState?.bestParams?.outboundAttractionDistribution ?? false,
+      linLogMode: optimizerState.optimState?.bestParams?.linLogMode ?? false,
+      adjustSizes: optimizerState.optimState?.bestParams?.adjustSizes ?? false,
+    };
+  }
 
-	function mulberry32(a: number) {
-		return function () {
-			let t = (a += 0x6d2b79f5);
-			t = Math.imul(t ^ (t >>> 15), t | 1);
-			t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-		};
-	}
+  function effectiveWeights(): HeuristicWeights {
+    const w = {} as HeuristicWeights;
+    for (const k of Object.keys(optimizerState.weights) as (keyof HeuristicWeights)[]) {
+      w[k] = optimizerState.ignoreWeights[k] ? 0 : optimizerState.weights[k];
+    }
+    return w;
+  }
 
-	function normalSample(rng: () => number, mean: number, std: number): number {
-		const u1 = rng() || 1e-10;
-		const u2 = rng();
-		return mean + std * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-	}
+  function fmt(n: number): string {
+    return parseFloat(n.toFixed(3)).toString();
+  }
+
+  function tuneSeries(): PlotSeries[] {
+    return [
+      { label: "episode reward", data: optimizerState.episodeMeans, color: "#f59f00", width: 2 },
+      { label: "iters/sec", data: optimizerState.episodeItersPerSec, color: "#3b82f6", width: 1.5 },
+    ];
+  }
+
+  function buildPreviewGraphFn(params: FA2Params, iterations = 800): Graph | null {
+    if (!uiState.currentGraph || uiState.currentGraph.order === 0) return null;
+    const g = uiState.currentGraph.copy();
+    circular.assign(g, { scale: 100 });
+    for (let i = 0; i < iterations; i++) {
+      forceAtlas2.assign(g, { iterations: 1, settings: { ...params } });
+    }
+    let bad = false;
+    g.forEachNode((_id, attrs) => {
+      const a = attrs as { x: number; y: number };
+      if (!Number.isFinite(a.x) || !Number.isFinite(a.y)) bad = true;
+    });
+    if (bad) return null;
+    return g;
+  }
+
+  let previewParams: FA2Params | null = null;
+  let previewFrame = 0;
+
+  function stepPreview(dt: number) {
+    if (!previewGraph || !sigmaInstance) return;
+    if (previewParams === null) {
+      previewParams = { ...getCurrentFA2Settings() };
+      previewFrame = 0;
+    }
+    const frames = Math.max(1, Math.round(optimizerState.episodeLength / dt));
+    if (previewFrame < frames) {
+      forceAtlas2.assign(previewGraph, { iterations: 1, settings: { ...previewParams } });
+      previewFrame++;
+    } else {
+      previewParams = null;
+      previewFrame = 0;
+    }
+    if (sigmaInstance) sigmaInstance.refresh({ skipIndexation: true });
+  }
+
+  function runLayoutChunk() {
+    if (!layoutState.running || !uiState.currentGraph || !layoutController) return;
+
+    const now = performance.now();
+    const dt = Math.min((now - layoutState.lastFrameTs) / 1000, 0.25);
+    layoutState.lastFrameTs = now;
+
+    // Viewer loop
+    if (!optimizerState.autoTune) {
+      const result = layoutController.step();
+      if (result.stat) {
+        recordTick(result.stat, result.positions);
+        setHeuristicFeatures(optimizer.featureView(result.stat));
+      }
+    }
+
+    // Preview loop - always animate the best-params graph
+    stepPreview(dt);
+
+    if (sigmaInstance) sigmaInstance.refresh({ skipIndexation: true });
+    if (uiState.showGrid || uiState.enforceBounds) grid?.draw();
+    if (showTrails) drawTrails();
+    if (uiState.autoFit) fitCamera(false);
+
+    if (layoutState.running) rafId = requestAnimationFrame(runLayoutChunk);
+  }
+
+  // --- Sigma setup ---
+  function ensureSigma() {
+    if (sigmaInstance || !host) return;
+    const empty = new Graph({ multi: false });
+    const s = new Sigma(empty, host, {
+      primitives: { nodes: { shapes: [sdfCircle()] } },
+      styles: {
+        nodes: [{ color: { attribute: "color" }, size: { attribute: "size" } }],
+        edges: [{ color: { attribute: "color" } }],
+      },
+      settings: { allowInvalidContainer: true, itemSizesReference: "screen" },
+    });
+    sigmaInstance = s;
+    (window as any).__sigma = s;
+
+    // Shared reference grid (lines + coordinate labels + optional bounds box).
+    if (host) {
+      grid = createGridOverlay(host, {
+        getSigma: () => sigmaInstance,
+        getGraph: () => uiState.currentGraph,
+        getShow: () => uiState.showGrid || uiState.enforceBounds,
+        getBounds: () => (uiState.enforceBounds ? { maxX: uiState.boundsMaxX, maxY: uiState.boundsMaxY } : null),
+      });
+    }
+
+    s.getCamera().addListener("updated", () => {
+      grid?.draw();
+      if (untrack(() => showTrails)) drawTrails();
+      if (!suppressCameraUpdate && untrack(() => uiState.autoFit)) uiState.autoFit = false;
+    });
+
+    s.setSetting("nodeReducer", (node, data) => {
+      const d = { ...data } as Record<string, unknown>;
+      if (focusSet.size > 0) {
+        if (focusSet.has(node)) {
+          d.zIndex = 1;
+        } else {
+          d.color = toRgba(String(d.color ?? "#888"), 0.12);
+          d.zIndex = 0;
+          d.label = "";
+        }
+      }
+      return d as never;
+    });
+
+    s.setSetting("edgeReducer", (edge, data) => {
+      const d = { ...data } as Record<string, unknown>;
+      if (focusSet.size > 0 && uiState.currentGraph) {
+        const src = uiState.currentGraph.source(edge);
+        const tgt = uiState.currentGraph.target(edge);
+        if (focusSet.has(src) && focusSet.has(tgt)) {
+          d.zIndex = 1;
+        } else {
+          if (typeof d.color === "string") d.color = toRgba(d.color, 0.08);
+          d.zIndex = 0;
+        }
+      }
+      return d as never;
+    });
+
+    s.on("enterNode", ({ node }: { node: string }) => {
+      const nb = new Set<string>([node]);
+      uiState.currentGraph?.forEachNeighbor(node, (n) => nb.add(n));
+      focusSet = nb;
+      s.refresh({ skipIndexation: true });
+    });
+
+    s.on("leaveNode", () => {
+      focusSet.clear();
+      s.refresh({ skipIndexation: true });
+    });
+
+    s.on("clickNode", ({ node }: { node: string }) => {
+      // Handle click if needed
+    });
+
+    s.on("clickStage", () => {
+      focusSet.clear();
+      s.refresh({ skipIndexation: true });
+      if (uiState.autoFit) {
+        fitAll(s, uiState.currentGraph!, { animate: true });
+        uiState.autoFit = false;
+      }
+    });
+  }
+
+  function destroySigma() {
+    if (containerObserver) { containerObserver.disconnect(); containerObserver = null; }
+    if (sigmaInstance) { sigmaInstance.kill(); sigmaInstance = null; }
+  }
+
+  function freezeGridBBox() {
+    if (!sigmaInstance || !uiState.currentGraph || uiState.currentGraph.order === 0) return;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    uiState.currentGraph.forEachNode((_id, a) => {
+      const na = a as { x: number; y: number };
+      if (na.x < minX) minX = na.x;
+      if (na.x > maxX) maxX = na.x;
+      if (na.y < minY) minY = na.y;
+      if (na.y > maxY) maxY = na.y;
+    });
+    sigmaInstance.setCustomBBox({ x: [minX, maxX], y: [minY, maxY] });
+  }
+
+  function fitCamera(animate = true) {
+    if (!sigmaInstance || !uiState.currentGraph) return;
+    const state = getCameraStateToFitViewportToNodes(sigmaInstance, uiState.currentGraph, { padding: 20 });
+    sigmaInstance.getCamera().animate({ ...state, duration: animate ? 400 : 0 });
+  }
+
+  function fitAll(s: Sigma, g: Graph, opts: { animate: boolean }) {
+    const state = getCameraStateToFitViewportToNodes(s, g, { padding: 20 });
+    s.getCamera().animate({ ...state, duration: opts.animate ? 400 : 0 });
+  }
+
+  function clearTrails() {
+    const c = trailCanvas;
+    if (c) c.getContext("2d")?.clearRect(0, 0, c.width, c.height);
+  }
+
+  function drawTrails() {
+    const c = trailCanvas;
+    if (!c || !sigmaInstance || !uiState.currentGraph) return;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    const dpr = devicePixelRatio || 1;
+    const cssW = c.width / dpr, cssH = c.height / dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, cssH);
+    const op = trailOpacity;
+    uiState.currentGraph.forEachNode((id, attrs) => {
+      const hist = trailHistory.get(id);
+      if (!hist || hist.length < 2) return;
+      const baseColor = String((attrs as { color: string }).color);
+      const n = hist.length;
+      for (let i = 0; i < n - 1; i++) {
+        const a = (op * (i + 1)) / n;
+        const p = sigmaInstance!.graphToViewport({ x: hist[i].x, y: hist[i].y });
+        const q = sigmaInstance!.graphToViewport({ x: hist[i + 1].x, y: hist[i + 1].y });
+        ctx.strokeStyle = toRgba(baseColor, a);
+        ctx.lineWidth = 2 * ((i + 1) / n);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(q.x, q.y);
+        ctx.stroke();
+      }
+    });
+  }
+
+  function toRgba(hex: string, alpha: number): string {
+    const h = hex.replace("#", "");
+    const r = parseInt(h.slice(0, 2), 16);
+    const g = parseInt(h.slice(2, 4), 16);
+    const b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  onDestroy(() => {
+    stopLayoutFn();
+    trainer?.stop();
+    destroySigma();
+  });
 </script>
 
 <div class="flex flex-col h-screen bg-base-100 text-base-content">
-	<!-- Top area: sidebar + graph -->
-	<div class="flex-1 flex min-h-0">
-		<!-- Left sidebar: tabs + settings -->
-		{#if sidebarOpen}
-			<div class="w-72 shrink-0 border-r border-base-300 bg-base-200 flex flex-col relative">
-				<!-- Sub-tabs -->
-				<div class="tabs tabs-boxed tabs-sm p-1 pb-0">
-					<button class="tab tab-sm {settingsTab === 'graph' ? 'tab-active' : ''}" onclick={() => (settingsTab = 'graph')}>Graph</button>
-					<button class="tab tab-sm {settingsTab === 'fa2' ? 'tab-active' : ''}" onclick={() => (settingsTab = 'fa2')}>ForceAtlas2</button>
-				</div>
+  <!-- Top area: sidebar + graph -->
+  <div class="flex-1 flex min-h-0">
+    <!-- Left sidebar: tabs + settings -->
+    <div class="w-72 shrink-0 border-r border-base-300 bg-base-200 flex flex-col relative {sidebarOpen ? '' : 'hidden'}">
+      <div
+        class="tabs tabs-lift tabs-sm p-1 cursor-pointer"
+        role="tablist"
+        aria-label="Settings tabs"
+        onclick={() => sidebarOpen = !sidebarOpen}
+        title="Click to collapse sidebar"
+      >
+        <button role="tab" aria-selected={uiState.settingsTab === 'fa2'} class="tab tab-sm {uiState.settingsTab === 'fa2' ? 'tab-active' : ''}" onclick={(e) => { e.stopPropagation(); setSettingsTab('fa2'); }} title="ForceAtlas2 layout parameters">ForceAtlas2</button>
+        <button role="tab" aria-selected={uiState.settingsTab === 'graph'} class="tab tab-sm {uiState.settingsTab === 'graph' ? 'tab-active' : ''}" onclick={(e) => { e.stopPropagation(); setSettingsTab('graph'); }} title="Graph generation settings">Graph</button>
+        <button class="btn btn-sm btn-ghost ml-auto" onclick={(e) => { e.stopPropagation(); sidebarOpen = false; }} title="Collapse sidebar">‹</button>
+      </div>
 
-				<!-- Settings content -->
-				<div class="flex-1 overflow-y-auto px-3 py-2">
-					{#if settingsTab === 'graph'}
-						<div class="flex flex-col gap-2">
-							<fieldset class="fieldset border border-base-300 rounded-box p-2">
-								<legend class="fieldset-legend text-xs">Generation</legend>
-								<div class="flex flex-col gap-1.5">
-									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">Nodes</span>
-										<input type="range" min="1" max="2000" step="1" bind:value={nodeCount} disabled={layoutRunning} class="range range-xs flex-1" />
-										<span class="w-10 text-right">{nodeCount}</span>
-									</label>
-									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">Clusters</span>
-										<input type="range" min="1" max="20" step="1" bind:value={clusterCount} disabled={layoutRunning} class="range range-xs flex-1" />
-										<span class="w-10 text-right">{clusterCount}</span>
-									</label>
+      <div class="flex-1 overflow-y-auto p-3" style="min-height: 0;">
+        {#if uiState.settingsTab === 'fa2'}
+          <div class="flex flex-col gap-2">
+            <ParamControls
+              params={getCurrentFA2Settings()}
+              locked={optimizerState.lockedParams}
+              autoTune={optimizerState.autoTune}
+              bestParams={optimizerState.optimState?.bestParams}
+              onChange={(key, value) => {
+                if (optimizerState.autoTune) {
+                  optimizer.setIncumbentParam(key, value);
+                }
+              }}
+              onLockToggle={toggleLock}
+            />
 
-									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">Degree %</span>
-										<input type="range" min="0" max="1" step="0.01" bind:value={degreeRatio} disabled={layoutRunning} class="range range-xs flex-1" />
-										<span class="w-10 text-right">{(degreeRatio * 100).toFixed(0)}%</span>
-									</label>
-									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">Seed</span>
-										<input type="number" bind:value={seed} disabled={layoutRunning} class="input input-bordered input-xs font-mono w-20" />
-									</label>
-								</div>
-								<div class="flex gap-2 mt-2">
-									<button class="btn btn-xs btn-ghost btn-block" disabled={layoutRunning} onclick={() => {
-										nodeCount = 200;
-										clusterCount = 10;
-										clusterStrength = 3;
-										degreeRatio = 0.3;
-										seed = 42;
-										intraClusterOnly = true;
-									}}>Reset</button>
-								</div>
-							</fieldset>
-							<fieldset class="fieldset border border-base-300 rounded-box p-2">
-								<legend class="fieldset-legend text-xs">Options</legend>
-								<div class="flex flex-col gap-1">
-									<label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer">
-										<input type="checkbox" bind:checked={intraClusterOnly} disabled={layoutRunning} class="checkbox checkbox-xs" />
-										Intra-cluster only
-									</label>
-								</div>
-							</fieldset>
-						</div>
+              <fieldset class="fieldset border border-base-300 rounded-box p-2">
+                <legend class="fieldset-legend text-xs flex items-center gap-1">
+                  Options
+                  <span class="badge badge-xs badge-ghost">🔒 = locked from optimizer</span>
+                </legend>
+                <div class="flex flex-col gap-1">
+                  {#each [
+                    { key: "strongGravityMode", label: "Strong Gravity", title: "Force all nodes toward center regardless of edges" },
+                    { key: "barnesHutOptimize", label: "BH Optimize", title: "Use Barnes-Hut quadtree approximation for repulsion" },
+                    { key: "outboundAttractionDistribution", label: "Outbound", title: "Distribute attraction force to outbound edges" },
+                    { key: "linLogMode", label: "LinLog", title: "Logarithmic attraction for high-degree nodes" },
+                    { key: "adjustSizes", label: "Adjust Sizes", title: "Adjust node sizes based on degree" },
+                  ] as item}
+                    <div class="flex items-center gap-1.5 text-xs font-mono cursor-pointer">
+                      <label class="flex items-center gap-1.5 flex-1 cursor-pointer" title={item.title}>
+                        <input type="checkbox" checked={getCurrentFA2Settings()[item.key] as boolean} class="checkbox checkbox-xs" disabled={optimizerState.autoTune && !optimizerState.lockedParams.has(item.key)} onchange={(e) => {
+                          if (!optimizerState.autoTune || optimizerState.lockedParams.has(item.key)) {
+                            if (optimizerState.autoTune) {
+                              optimizer.setIncumbentParam(item.key, e.currentTarget.checked);
+                            }
+                          }
+                        }} />
+                        {item.label}
+                      </label>
+                      <button type="button" class="btn btn-xs btn-ghost px-1 min-h-0 h-5 {optimizerState.lockedParams.has(item.key) ? 'text-warning' : 'text-base-content/30'}" onclick={() => handleLockToggle(item.key)} title="Lock from optimizer">{optimizerState.lockedParams.has(item.key) ? '🔒' : '🔓'}</button>
+                    </div>
+                  {/each}
+                </div>
+                <div class="flex gap-2 mt-2">
+                  <button class="btn btn-xs btn-ghost btn-block" onclick={() => {
+                    optimizer.setIncumbentParam("gravity", 1);
+                    optimizer.setIncumbentParam("slowDown", 1);
+                    optimizer.setIncumbentParam("scalingRatio", 10);
+                    optimizer.setIncumbentParam("barnesHutTheta", 0.5);
+                    optimizer.setIncumbentParam("edgeWeightInfluence", 1);
+                    optimizer.setIncumbentParam("strongGravityMode", false);
+                    optimizer.setIncumbentParam("barnesHutOptimize", true);
+                    optimizer.setIncumbentParam("outboundAttractionDistribution", false);
+                    optimizer.setIncumbentParam("linLogMode", false);
+                    optimizer.setIncumbentParam("adjustSizes", false);
+                    setLockedParams(new Set());
+                    if (optimizerState.autoTune && optimizer.isCalibrated()) {
+                      optimizer.retarget({ ...getCurrentFA2Settings() }, optimizerState.lockedParams, CONTEXT_DIM);
+                    }
+                  }}>Reset</button>
+                </div>
+              </fieldset>
 
-					{:else if settingsTab === 'fa2'}
-						<div class="flex flex-col gap-2">
-							<fieldset class="fieldset border border-base-300 rounded-box p-2">
-								<legend class="fieldset-legend text-xs">Parameters</legend>
-								<div class="flex flex-col gap-1.5">
-									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">Gravity</span>
-										<input type="range" min="0.01" max="10" step="0.01" bind:value={fa2Settings.gravity} class="range range-xs flex-1" />
-										<span class="w-10 text-right">{fa2Settings.gravity}</span>
-									</label>
-									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">SlowDown</span>
-										<input type="range" min="0.1" max="50" step="0.1" bind:value={fa2Settings.slowDown} class="range range-xs flex-1" />
-										<span class="w-10 text-right">{fa2Settings.slowDown}</span>
-									</label>
-									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">Scaling</span>
-										<input type="range" min="1" max="100" step="1" bind:value={fa2Settings.scalingRatio} class="range range-xs flex-1" />
-										<span class="w-10 text-right">{fa2Settings.scalingRatio}</span>
-									</label>
-									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">BH Theta</span>
-										<input type="range" min="0.1" max="1" step="0.05" bind:value={fa2Settings.barnesHutTheta} class="range range-xs flex-1" />
-										<span class="w-10 text-right">{fa2Settings.barnesHutTheta}</span>
-									</label>
-									<label class="flex items-center gap-2 text-xs font-mono">
-										<span class="w-16">Edge Wt</span>
-										<input type="range" min="0" max="5" step="0.1" bind:value={fa2Settings.edgeWeightInfluence} class="range range-xs flex-1" />
-										<span class="w-10 text-right">{fa2Settings.edgeWeightInfluence}</span>
-									</label>
-								</div>
-							</fieldset>
-							<fieldset class="fieldset border border-base-300 rounded-box p-2">
-								<legend class="fieldset-legend text-xs">Options</legend>
-								<div class="flex flex-col gap-1">
-									<label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer">
-										<input type="checkbox" bind:checked={fa2Settings.strongGravityMode} class="checkbox checkbox-xs" />
-										Strong Gravity
-									</label>
-									<label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer">
-										<input type="checkbox" bind:checked={fa2Settings.barnesHutOptimize} class="checkbox checkbox-xs" />
-										BH Optimize
-									</label>
-									<label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer">
-										<input type="checkbox" bind:checked={fa2Settings.outboundAttractionDistribution} class="checkbox checkbox-xs" />
-										Outbound
-									</label>
-									<label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer">
-										<input type="checkbox" bind:checked={fa2Settings.linLogMode} class="checkbox checkbox-xs" />
-										LinLog
-									</label>
-									<label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer">
-										<input type="checkbox" bind:checked={fa2Settings.adjustSizes} class="checkbox checkbox-xs" />
-										Adjust Sizes
-									</label>
-</div>
-								<div class="flex gap-2 mt-2">
-									<button class="btn btn-xs btn-ghost btn-block" onclick={() => {
-										fa2Settings.gravity = 1;
-										fa2Settings.slowDown = 1;
-										fa2Settings.scalingRatio = 10;
-										fa2Settings.barnesHutTheta = 0.5;
-										fa2Settings.edgeWeightInfluence = 1;
-										fa2Settings.strongGravityMode = false;
-										fa2Settings.barnesHutOptimize = true;
-										fa2Settings.outboundAttractionDistribution = false;
-										fa2Settings.linLogMode = false;
-										fa2Settings.adjustSizes = false;
-									}}>Reset</button>
-								</div>
-							</fieldset>
-						</div>
+              <fieldset class="fieldset border border-base-300 rounded-box p-2">
+                <legend class="fieldset-legend text-xs">Bounds · dashed = clamp box</legend>
+                <div class="flex flex-col gap-1.5">
+                  <label class="flex items-center gap-1.5 text-xs font-mono cursor-pointer" title="Clamp every node to [−max, +max] on each axis each layout tick">
+                    <input type="checkbox" bind:checked={uiState.enforceBounds} class="checkbox checkbox-xs" />
+                    Clamp to box
+                  </label>
+                  <label class="flex items-center gap-2 text-xs font-mono" title="Max |x| — nodes clamped to ± this">
+                    <span class="w-14 shrink-0 opacity-70">Max |x|</span>
+                    <input type="range" min="50" max="2000" step="50" bind:value={uiState.boundsMaxX} class="range range-xs flex-1" disabled={!uiState.enforceBounds} />
+                    <span class="w-10 text-right shrink-0">{uiState.boundsMaxX}</span>
+                  </label>
+                  <label class="flex items-center gap-2 text-xs font-mono" title="Max |y| — nodes clamped to ± this">
+                    <span class="w-14 shrink-0 opacity-70">Max |y|</span>
+                    <input type="range" min="50" max="1500" step="50" bind:value={uiState.boundsMaxY} class="range range-xs flex-1" disabled={!uiState.enforceBounds} />
+                    <span class="w-10 text-right shrink-0">{uiState.boundsMaxY}</span>
+                  </label>
+                </div>
+              </fieldset>
 
-					{/if}
-			</div>
+              <fieldset class="fieldset border border-base-300 rounded-box p-2">
+                <legend class="fieldset-legend text-xs">Layout</legend>
+                <div class="flex flex-col gap-1.5">
+                  <button class="btn btn-sm btn-block" disabled={layoutState.running || !uiState.graphReady} onclick={startLayoutFn}>
+                    Start Layout
+                  </button>
+                  <button class="btn btn-sm btn-warning btn-block" disabled={!layoutState.running} onclick={stopLayoutFn}>
+                    Stop Layout
+                  </button>
+                  <button class="btn btn-xs btn-ghost btn-block" onclick={resetAll}>Reset</button>
+                </div>
+              </fieldset>
+            </div>
+          {/if}
 
-			<!-- Collapse button -->
-			<button
-				class="btn btn-sm btn-ghost absolute top-1 right-1 z-10 bg-base-300/80 backdrop-blur"
-				onclick={() => (sidebarOpen = false)}
-			>&lsaquo;</button>
-			</div>
-		{:else}
-			<button
-				class="btn btn-sm btn-ghost shrink-0 self-start m-1 bg-base-300/80 backdrop-blur"
-				onclick={() => (sidebarOpen = true)}
-			>&rsaquo;</button>
-		{/if}
+          {#if uiState.settingsTab === 'graph'}
+            <div class="flex flex-col gap-2">
+              <div class="flex items-center gap-2 text-xs font-mono">
+                <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Total number of nodes">
+                  <span class="w-24">Nodes</span>
+                  <input type="range" min="10" max="2000" step="10" bind:value={uiState.nodeCount} class="range range-xs flex-1" />
+                  <span class="w-10 text-right shrink-0">{uiState.nodeCount}</span>
+                </label>
+              </div>
+              <div class="flex items-center gap-2 text-xs font-mono">
+                <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Number of clusters">
+                  <span class="w-24">Clusters</span>
+                  <input type="range" min="1" max="50" step="1" bind:value={uiState.clusterCount} class="range range-xs flex-1" />
+                  <span class="w-10 text-right shrink-0">{uiState.clusterCount}</span>
+                </label>
+              </div>
+              <div class="flex items-center gap-2 text-xs font-mono">
+                <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Target edge density (fraction of possible edges)">
+                  <span class="w-24">Degree Ratio</span>
+                  <input type="range" min="0.01" max="1" step="0.01" bind:value={uiState.degreeRatio} class="range range-xs flex-1" />
+                  <span class="w-10 text-right shrink-0">{uiState.degreeRatio.toFixed(2)}</span>
+                </label>
+              </div>
+              <div class="flex items-center gap-2 text-xs font-mono">
+                <label class="flex items-center gap-2 flex-1 cursor-pointer" title="Use fixed seed for reproducibility">
+                  <input type="checkbox" bind:checked={uiState.useFixedSeed} class="checkbox checkbox-xs" />
+                  Fixed Seed
+                </label>
+                <input type="number" min="0" max="2147483647" step="1" bind:value={uiState.fixedSeed} class="input input-xs input-bordered w-20" disabled={!uiState.useFixedSeed} />
+              </div>
 
-		<!-- Graph canvas -->
-		<div class="relative flex-1 min-h-0">
-			<div class="absolute inset-0" bind:this={host}></div>
-			<canvas bind:this={gridCanvas} class="absolute inset-0 pointer-events-none z-10"></canvas>
-			<!-- Floating back button -->
-			<div class="absolute top-3 left-3 z-10">
-				<button class="btn btn-ghost btn-sm bg-base-200/80 backdrop-blur" onclick={goHome}>&larr; Back</button>
-			</div>
-			<!-- Floating iteration count -->
-			{#if layoutRunning}
-				<div class="absolute top-3 right-3 z-10">
-					<span class="badge badge-primary badge-sm gap-1">
-						<span class="loading loading-dots loading-xs"></span>
-						Iter: {iterations}
-					</span>
-				</div>
-			{/if}
-			<!-- Bottom right: layout controls -->
-			<div class="absolute bottom-3 right-3 z-10 flex flex-col items-end gap-2">
-				<div class="flex flex-col gap-1 text-xs font-mono bg-base-200/80 backdrop-blur rounded px-2 py-1.5">
-					<label class="flex items-center gap-1.5 cursor-pointer select-none">
-						<input type="checkbox" bind:checked={autoFit} class="checkbox checkbox-xs" />
-						Auto-fit
-					</label>
-					<label class="flex items-center gap-1.5 cursor-pointer select-none">
-						<input type="checkbox" bind:checked={showGrid} class="checkbox checkbox-xs" />
-						Grid
-					</label>
-				</div>
-			</div>
-	</div>
-	</div>
+              <div class="mt-2 flex flex-col gap-1">
+                <div class="text-[10px] uppercase tracking-wide opacity-60">Est. edges: {estEdgeCount} {estEdgeCount > MAX_EDGES ? '⚠️' : ''} / {MAX_EDGES} max</div>
+                <div class="text-[10px] uppercase tracking-wide opacity-60">Clamped: {clampNodeCount({ nodeCount: uiState.nodeCount, clusterCount: uiState.clusterCount, degreeRatio: uiState.degreeRatio, seed: uiState.fixedSeed }).nodeCount !== uiState.nodeCount ? 'yes' : 'no'}</div>
+              </div>
 
-	<!-- Bottom: Live View (full width) -->
-	<div class="shrink-0 border-t border-base-300 bg-base-200 flex flex-col relative">
-		<!-- Collapse toggle bar -->
-		<button
-			class="btn btn-sm btn-ghost bg-base-300/80 backdrop-blur self-start mx-2 mt-1"
-			onclick={() => (bottomOpen = !bottomOpen)}
-		>
-			{bottomOpen ? "▼" : "▲"} Live View
-			{#if tickStats.length > 0}
-				<span class="badge badge-xs badge-primary ml-1 px-1.5 py-0.5">{tickStats.length}</span>
-			{/if}
-		</button>
-		{#if bottomOpen}
-			<div class="overflow-y-auto px-3 pb-2" style="max-height: 22rem;">
-					<LiveViewPanel
-					stats={tickStats}
-					running={layoutRunning}
-					quality={layoutQuality}
-					onStartStop={layoutRunning ? stopLayout : startLayout}
-					onReset={() => { stopLayout(); tickStats = []; layoutQuality = 0; iterations = 0; rebuildGraph(); }}
-				/>
-			</div>
-		{/if}
-	</div>
-</div>
+<button class="btn btn-sm btn-block mt-2" onclick={rebuildGraph}>Regenerate Graph</button>
+            </div>
+          {/if}
+        </div>
+      </div>
+
+    <!-- Graph canvas -->
+    <div class="flex-1 relative min-w-0" bind:this={host}>
+      <canvas class="absolute inset-0" bind:this={trailCanvas}></canvas>
+      <DebugOverlay visible={debugOverlayVisible} stats={layoutState.tickStats} />
+      <div class="absolute top-2 right-2 flex flex-col gap-1">
+        <button class="btn btn-sm btn-ghost btn-circle" onclick={() => sidebarOpen = !sidebarOpen} title="Toggle sidebar">☰</button>
+        <button class="btn btn-sm btn-ghost btn-circle" onclick={() => debugOverlayVisible = !debugOverlayVisible} title="Toggle debug overlay">🐛</button>
+        <button class="btn btn-sm btn-ghost btn-circle" onclick={goHome} title="Back to main">←</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom: tabbed Live View / Auto-tune -->
+  <div class="shrink-0 border-t border-base-300 bg-base-200 flex flex-col relative">
+    <button class="h-2 w-full shrink-0 cursor-pointer hover:bg-primary/20" onclick={toggleBottomOpen} title="Click to toggle bottom panel" aria-label="Toggle bottom panel"></button>
+    <div class="tabs tabs-lift tabs-sm p-1" role="tablist" aria-label="Bottom tabs">
+      <button role="tab" aria-selected={uiState.bottomTab === 'live'} class="tab tab-sm {uiState.bottomTab === 'live' ? 'tab-active' : ''}" onclick={() => setBottomTab('live')} title="Live layout metrics">Live View</button>
+      <button role="tab" aria-selected={uiState.bottomTab === 'autotune'} class="tab tab-sm {uiState.bottomTab === 'autotune' ? 'tab-active' : ''}" onclick={() => setBottomTab('autotune')} title="Auto-tune FA2 parameters">Auto-tune</button>
+      <button class="btn btn-sm btn-ghost bg-base-300/80 backdrop-blur ml-auto" onclick={toggleBottomOpen}>{uiState.bottomOpen ? "▼" : "▲"}</button>
+    </div>
+    {#if uiState.bottomOpen}
+      <div class="overflow-y-auto px-3 pb-2" style="max-height: 22rem; min-height: 22rem;">
+        {#if uiState.bottomTab === 'live'}
+          <LiveViewPanel stats={layoutState.tickStats} running={layoutState.running} />
+        {:else if uiState.bottomTab === 'autotune'}
+          <fieldset class="fieldset rounded-box p-2 overflow-x-hidden mt-1">
+            <div class="flex flex-wrap items-center gap-1.5 mt-1">
+              <button type="button" class="btn btn-xs {optimizerState.autoTune ? 'btn-success' : 'btn-primary'}" onclick={handleAutoTuneToggle} title="{optimizerState.autoTune ? 'Stop optimizing and apply the best parameters found so far' : 'Start optimizing FA2 parameters against the heuristic'}">
+                {optimizerState.autoTune ? 'Stop optimizing' : 'Start optimizing'}
+              </button>
+            </div>
+            <label class="flex items-center gap-2 text-xs font-mono mt-2" title="Seconds each candidate layout runs before it is scored and (on rejection) rolled back — the episode length">
+              <span class="w-24 shrink-0">Episode len</span>
+              <input type="range" min="0.5" max="10" step="0.5" bind:value={optimizerState.episodeLength} onchange={() => setEpisodeLength(optimizerState.episodeLength)} class="range range-xs flex-1" />
+              <span class="w-12 text-right shrink-0">{optimizerState.episodeLength.toFixed(1)} s</span>
+            </label>
+
+            <div class="mt-2 flex flex-col gap-1">
+              <div class="text-[10px] uppercase tracking-wide opacity-60">Weights · click effect icon to flip reward/penalise · click name to mute · w = weight · val = feature · H = live contribution{#if optimizerState.autoTune && !optimizer.isCalibrated()} · calibrating…{/if}</div>
+              {#each Object.keys(optimizerState.weights) as k}
+                <FeatureTooltip k={k} class="flex items-center gap-1.5 text-xs font-mono min-w-0 {optimizerState.ignoreWeights[k] ? 'opacity-40' : ''}">
+                  <label class="cursor-pointer shrink-0" title="Ignore this weight (force to 0)">
+                    <input type="checkbox" checked={optimizerState.ignoreWeights[k]} onchange={() => toggleIgnoreWeight(k)} class="checkbox checkbox-xs checkbox-ghost" />
+                  </label>
+                  <span class="w-16 shrink-0 truncate cursor-pointer" title="{optimizerState.weights[k]}" onclick={() => toggleIgnoreWeight(k)}>{k}</span>
+                  <button type="button" class="badge badge-xs {optimizerState.signs[k] === 1 ? 'badge-success' : 'badge-error'} shrink-0 cursor-pointer" onclick={() => { optimizerState.signs[k] = optimizerState.signs[k] === 1 ? -1 : 1; optimizer.setSigns({ ...optimizerState.signs }); }}>{optimizerState.signs[k] === 1 ? '+' : '−'}</button>
+                  <input type="range" min="0" max="3" step="0.1" bind:value={optimizerState.weights[k]} class="range range-xs flex-1 min-w-0" disabled={optimizerState.ignoreWeights[k]} />
+                  <span class="w-8 text-right shrink-0">{fmt(optimizerState.weights[k])}</span>
+                  <span class="w-10 text-right shrink-0 font-mono" style="color: var(--p);">{optimizerState.optimState?.featureView ? fmt((optimizerState.optimState.featureView as unknown as Record<string, number>)[k] ?? 0) : '—'}</span>
+                  <span class="w-10 text-right shrink-0 font-mono" style="color: var(--p);">{fmt(optimizerState.optimState?.featureView ? ((optimizerState.signs[k] as 1 | -1) * optimizerState.weights[k] * (optimizerState.optimState.featureView as unknown as Record<string, number>)[k] ?? 0) : 0)}</span>
+                </FeatureTooltip>
+              {/each}
+            </div>
+
+            <div class="mt-2">
+              <div class="text-[10px] uppercase tracking-wide opacity-60 mb-1">Episode reward · mean per episode (legend = latest)</div>
+              <ScorePlot series={tuneSeries()} />
+            </div>
+
+            {#if optimizerState.optimState}
+              <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
+                <div class="font-mono">
+                  <div>Best params view</div>
+                  <div>Iter: {optimizerState.optimState.episode}</div>
+                  <div class="text-[10px] opacity-70">{formatParams(optimizerState.optimState.bestParams)}</div>
+                </div>
+                <div class="font-mono">
+                  <div>Trainer</div>
+                  <div>{optimizerState.trainerStats.totalEpisodes} (background)</div>
+                  <div class="text-[10px] opacity-70">Ep/s: {optimizerState.trainerStats.episodesPerSec.toFixed(1)}</div>
+                </div>
+                <div class="font-mono col-span-2">
+                  <div>Episodes: {optimizerState.trainerStats.totalEpisodes}</div>
+                  <div class="text-[10px] opacity-70">Iters/s: {optimizerState.trainerStats.iterationsPerSec.toFixed(0)} | Time: {optimizerState.trainerStats.trainingTime.toFixed(1)}s</div>
+                </div>
+                <div class="font-mono col-span-2">
+                  <div>Best reward: {optimizerState.trainerStats.bestReward.toFixed(3)}</div>
+                  <div class="text-[10px] opacity-70">Exploration {optimizerState.optimState.explorationPct}% / Exploitation {optimizerState.optimState.exploitationPct}%</div>
+                </div>
+              </div>
+            {/if}
+
+            <div class="mt-2 flex flex-wrap gap-1">
+              <button class="btn btn-xs btn-primary" onclick={() => copyBestParams()}>Copy Best Params</button>
+              <button class="btn btn-xs btn-secondary" onclick={() => applyBestParams()}>Apply Best</button>
+            </div>
+          </fieldset>
+        {/if}
+      </div>
+    {/if}
+  </div>
+  </div>
+<script context="module">
+  function formatParams(p: FA2Params): string {
+    const PARAM_SHORT: Record<string, string> = {
+      gravity: "Grav", slowDown: "Slow", scalingRatio: "Scal",
+      barnesHutTheta: "BHT", edgeWeightInfluence: "EWt",
+      strongGravityMode: "SG", barnesHutOptimize: "BHO",
+      outboundAttractionDistribution: "OB", linLogMode: "LL", adjustSizes: "AS",
+    };
+    return (Object.keys(PARAM_SHORT) as (keyof FA2Params)[])
+      .map((k) => `${PARAM_SHORT[k]}=${typeof p[k] === "boolean" ? (p[k] ? "✓" : "✗") : p[k]}`)
+      .join(" ");
+  }
+
+  function copyBestParams() {
+    if (!optimizerState.optimState) return;
+    const p = optimizerState.optimState.bestParams;
+    const text = formatParams(p);
+    navigator.clipboard.writeText(text);
+  }
+
+  function applyBestParams() {
+    if (!optimizerState.optimState) return;
+    const p = optimizerState.optimState.bestParams;
+    for (const k of Object.keys(p) as (keyof FA2Params)[]) {
+      if (optimizerState.lockedParams.has(k)) {
+        optimizer.setIncumbentParam(k, p[k]);
+      }
+    }
+  }
+</script>

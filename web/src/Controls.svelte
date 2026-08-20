@@ -1,258 +1,228 @@
 <script>
 	let {
 		minW = $bindable(1),
-		maxW = $bindable(45),
 		minD = $bindable(1),
-		maxD = $bindable(90),
-		team = $bindable(null),
-		dateStart = $bindable(null),
-		dateEnd = $bindable(null),
-		teams = {},
+		maxWeight = 45,
 		maxDeg = 90,
-		maxWCap = 45,
-		dateMin = null,
-		dateMax = null,
 		edgeColor = $bindable("none"),
 		alphaMin = $bindable(0.05),
 		alphaMax = $bindable(0.6),
 		nodeColor = $bindable("jersey"),
-		onTeamZoom = () => {},
+		showCoaches = $bindable(false),
+		showMetaballs = $bindable(false),
+		showEdges = $bindable(false),
 		onEdgeAlpha = () => {},
 		onEdgeColor = () => {},
 	} = $props();
 
-	const sortedTeams = $derived(
-		Object.entries(teams)
-			.map(([tid, v]) => [tid, typeof v === "string" ? v : v?.name || ""])
-			.sort((a, b) => a[1].localeCompare(b[1])),
-	);
-
-	const filteredTeams = $derived.by(() => {
-		const s = teamSearch.trim().toLowerCase();
-		if (!s) return sortedTeams;
-		return sortedTeams.filter(([ , name]) => name.toLowerCase().includes(s));
-	});
-
-	const pct = (v, lo, hi) => (hi === lo ? 0 : ((v - lo) / (hi - lo)) * 100);
-	const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-
-	const WMIN = 1;
-	const WMAX = $derived(Math.max(WMIN, maxWCap));
-
-	// The sliders keep local draft values that update on every input event
-	// (so the number text and handle move in real time), but the bound filter
-	// props are only written on the change event — which fires once the user
-	// releases the slider. The graph therefore only rebuilds when the user is
-	// done dragging, not on every input event.
-	let wLo = $state(minW);
-	let wHi = $state(maxW);
+	// Sliders keep local draft values that update on every input event (so the
+	// number label moves in real time), but the bound filter props are only
+	// written on the change event — which fires once the user releases the
+	// slider. The graph therefore only rebuilds when the user is done dragging.
+	let wDraft = $state(minW);
+	let dDraft = $state(minD);
 	$effect(() => {
-		wLo = minW;
+		wDraft = minW;
 	});
 	$effect(() => {
-		wHi = maxW;
+		dDraft = minD;
 	});
-	const wLoPct = $derived(pct(wLo, WMIN, WMAX));
-	const wHiPct = $derived(pct(wHi, WMIN, WMAX));
+
+	let viewOpen = $state(false);
+	let filtersOpen = $state(false);
+	let viewMenuEl = $state();
+	let filtersMenuEl = $state();
+
+	$effect(() => {
+		if (!viewOpen && !filtersOpen) return;
+		const onKey = (e) => {
+			if (e.key === "Escape") {
+				viewOpen = false;
+				filtersOpen = false;
+			}
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	});
+
+	// Close a dropdown when clicking outside its menu element.
+	$effect(() => {
+		const el = filtersMenuEl;
+		if (!el) return;
+		const onDoc = (e) => {
+			if (!el.contains(e.target)) filtersOpen = false;
+		};
+		window.addEventListener("click", onDoc);
+		return () => window.removeEventListener("click", onDoc);
+	});
+	$effect(() => {
+		const el = viewMenuEl;
+		if (!el) return;
+		const onDoc = (e) => {
+			if (!el.contains(e.target)) viewOpen = false;
+		};
+		window.addEventListener("click", onDoc);
+		return () => window.removeEventListener("click", onDoc);
+	});
 
 	function commitW() {
-		let lo = clamp(wLo, WMIN, WMAX);
-		let hi = clamp(wHi, WMIN, WMAX);
-		if (lo > hi) [lo, hi] = [hi, lo];
-		minW = lo;
-		maxW = hi;
+		minW = wDraft;
 	}
-
-	function onWLo(e) {
-		wLo = +e.currentTarget.value;
+	function commitD() {
+		minD = dDraft;
 	}
-	function onWHi(e) {
-		wHi = +e.currentTarget.value;
-	}
-
-	const DMIN = 1;
-	const DMAX = $derived(Math.max(DMIN, maxDeg));
-	let dgLo = $state(minD);
-	let dgHi = $state(maxD);
-	$effect(() => {
-		dgLo = minD;
-	});
-	$effect(() => {
-		dgHi = maxD;
-	});
-	const degLoPct = $derived(pct(dgLo, DMIN, DMAX));
-	const degHiPct = $derived(pct(dgHi, DMIN, DMAX));
-
-	function commitDg() {
-		let lo = clamp(dgLo, DMIN, DMAX);
-		let hi = clamp(dgHi, DMIN, DMAX);
-		if (lo > hi) [lo, hi] = [hi, lo];
-		minD = lo;
-		maxD = hi;
-	}
-
-	function onDgLo(e) {
-		dgLo = +e.currentTarget.value;
-	}
-	function onDgHi(e) {
-		dgHi = +e.currentTarget.value;
-	}
-	const totalDays = $derived(
-		dateMin && dateMax
-			? clamp(Math.round((Date.parse(dateMax) - Date.parse(dateMin)) / 864e5), 0, 4000)
-			: 0,
-	);
-	const dayOf = (d) =>
-		d && dateMin ? Math.round((Date.parse(d) - Date.parse(dateMin)) / 864e5) : 0;
-	const dateOf = (i) => new Date(Date.parse(dateMin) + i * 864e5).toISOString().slice(0, 10);
-
-	let dLo = $state(dayOf(dateStart));
-	let dHi = $state(dayOf(dateEnd));
-	const dLoPct = $derived(pct(dLo, 0, totalDays));
-	const dHiPct = $derived(pct(dHi, 0, totalDays));
-
-	function onDateLo(e) {
-		dLo = Math.min(+e.currentTarget.value, dHi);
-	}
-	function onDateHi(e) {
-		dHi = Math.max(+e.currentTarget.value, dLo);
-	}
-	function commitDateLo() {
-		dateStart = dateOf(dLo);
-	}
-	function commitDateHi() {
-		dateEnd = dateOf(dHi);
-	}
-	$effect(() => {
-		dLo = dateStart == null ? 0 : dayOf(dateStart);
-	});
-	$effect(() => {
-		dHi = dateEnd == null ? totalDays : dayOf(dateEnd);
-	});
-
-let teamSearch = $state("");
-let open = $state(false);
 </script>
 
-<svelte:window
-	onclick={(ev) => {
-		if (ev.target instanceof Element && !ev.target.closest(".search-wrap")) open = false;
-	}}
-	onkeydown={(ev) => {
-		if (ev.key === "Escape") open = false;
-	}}
-/>
-
-<div class="control">
-	<label for="minw">Shared matches</label>
-	<div class="range-row">
-		<span class="endval">{wLo}</span>
-		<span class="dual" style="--lo:{wLoPct}%;--hi:{wHiPct}%">
-			<input type="range" id="minw" class="lo" value={wLo} min={WMIN} max={WMAX} oninput={onWLo} onchange={commitW} />
-			<input type="range" class="hi" value={wHi} min={WMIN} max={WMAX} oninput={onWHi} onchange={commitW} />
-		</span>
-		<span class="endval">{wHi}</span>
-	</div>
-</div>
-<div class="control">
-	<label for="mind">Degree</label>
-	<div class="range-row">
-		<span class="endval">{dgLo}</span>
-		<span class="dual" style="--lo:{degLoPct}%;--hi:{degHiPct}%">
-			<input type="range" id="mind" class="lo" value={dgLo} min={DMIN} max={DMAX} oninput={onDgLo} onchange={commitDg} />
-			<input type="range" id="maxd" class="hi" value={dgHi} min={DMIN} max={DMAX} oninput={onDgHi} onchange={commitDg} />
-		</span>
-		<span class="endval">{dgHi}</span>
-	</div>
-</div>
-<div class="control team-chips">
-	<label for="team-zoom">Zoom to team</label>
-	<div class="search-wrap">
+{#snippet rangeSlider(label, min, max, val, onInput, onCommit)}
+	<div class="flex flex-col gap-1.5">
+		<div class="flex items-center justify-between text-sm">
+			<span class="text-base-content/70">{label}</span>
+			<span class="font-semibold tabular-nums">{val}</span>
+		</div>
 		<input
-			id="team-zoom"
-			type="text"
-			placeholder="Zoom to team..."
-			bind:value={teamSearch}
-			onfocus={() => (open = true)}
-			oninput={() => (open = true)}
+			type="range"
+			min={min}
+			max={max}
+			step="1"
+			class="range w-full"
+			value={val}
+			oninput={onInput}
+			onchange={onCommit}
 		/>
-		{#if open && filteredTeams.length}
-			<div id="team-results">
-			{#each filteredTeams as [tid, name]}
-				<div
-					role="button"
-					tabindex="0"
-					onkeydown={(e) => {
-						if (e.key === "Enter" || e.key === " ") {
-							e.preventDefault();
-							open = false;
-							onTeamZoom(tid === "" ? null : Number(tid));
-						}
-					}}
-					onmousedown={(e) => e.preventDefault()}
-					onclick={(e) => {
-						e.stopPropagation();
-						open = false;
-						onTeamZoom(tid === "" ? null : Number(tid));
+	</div>
+{/snippet}
+
+<!-- All filter controls, grouped, with normal-sized inputs. Shared by the
+     desktop "View" dropdown and the mobile "Filters" dropdown. -->
+{#snippet filterControls()}
+	<div class="flex flex-col gap-5">
+		<section class="flex flex-col gap-3">
+			<h4 class="text-xs font-semibold uppercase tracking-wider text-base-content/50">Thresholds</h4>
+			{@render rangeSlider(
+				"Shared matches",
+				1,
+				maxWeight,
+				wDraft,
+				(e) => (wDraft = +e.currentTarget.value),
+				commitW,
+			)}
+			{@render rangeSlider(
+				"Degree",
+				1,
+				maxDeg,
+				dDraft,
+				(e) => (dDraft = +e.currentTarget.value),
+				commitD,
+			)}
+		</section>
+
+		<section class="flex flex-col gap-3">
+			<h4 class="text-xs font-semibold uppercase tracking-wider text-base-content/50">Appearance</h4>
+			<label class="flex items-center justify-between gap-2 text-sm">
+				<span class="text-base-content/70">Node colour</span>
+				<select class="select select-bordered" bind:value={nodeColor}>
+					<option value="jersey">Jersey number</option>
+					<option value="team">Team</option>
+					<option value="neutral">Neutral</option>
+				</select>
+			</label>
+			<label class="flex items-center justify-between gap-2 text-sm">
+				<span class="text-base-content/70">Edge colour</span>
+				<select
+					class="select select-bordered"
+					value={edgeColor}
+					onchange={(e) => {
+						edgeColor = e.currentTarget.value;
+						onEdgeColor(edgeColor);
 					}}
 				>
-					<b>{name}</b>
-				</div>
-			{/each}
+					<option value="none">Shared matches</option>
+					<option value="winrate">Avg win rate</option>
+				</select>
+			</label>
+			<div class="flex flex-col gap-1">
+				<span class="text-xs text-base-content/60">Edge opacity (min)</span>
+				<input
+					type="range"
+					min="0.05"
+					max="1"
+					step="0.05"
+					class="range w-full"
+					value={alphaMin}
+					oninput={(e) => {
+						alphaMin = +e.currentTarget.value;
+						onEdgeAlpha(alphaMin, alphaMax);
+					}}
+				/>
+				<span class="text-xs text-base-content/60">Edge opacity (max)</span>
+				<input
+					type="range"
+					min="0.05"
+					max="1"
+					step="0.05"
+					class="range w-full"
+					value={alphaMax}
+					oninput={(e) => {
+						alphaMax = +e.currentTarget.value;
+						onEdgeAlpha(alphaMin, alphaMax);
+					}}
+				/>
+			</div>
+		</section>
+
+		<section class="flex flex-col gap-3">
+			<h4 class="text-xs font-semibold uppercase tracking-wider text-base-content/50">Layers</h4>
+			<label class="flex cursor-pointer items-center gap-2 text-sm">
+				<input type="checkbox" class="checkbox" bind:checked={showEdges} />
+				<span>Show edges</span>
+			</label>
+			<label class="flex cursor-pointer items-center gap-2 text-sm">
+				<input type="checkbox" class="checkbox" bind:checked={showCoaches} />
+				<span>Show coaches</span>
+			</label>
+			<label class="flex cursor-pointer items-center gap-2 text-sm">
+				<input type="checkbox" class="checkbox" bind:checked={showMetaballs} />
+				<span>Show metaballs</span>
+			</label>
+		</section>
+	</div>
+{/snippet}
+
+<!-- Desktop: a "View" dropdown for everything -->
+<div class="flex">
+	<div class="relative" bind:this={viewMenuEl}>
+		<button
+			type="button"
+			class="btn btn-sm btn-outline"
+			tabindex="0"
+			onclick={() => (viewOpen = !viewOpen)}
+		>
+			View
+		</button>
+		{#if viewOpen}
+			<div
+				class="absolute left-0 z-40 mt-2 w-72 rounded-box border border-base-200 bg-base-100 p-4 shadow-xl"
+			>
+				{@render filterControls()}
 			</div>
 		{/if}
 	</div>
 </div>
-<div class="control">
-	<label for="datelo">Date</label>
-	<span class="dual" style="--lo:{dLoPct}%;--hi:{dHiPct}%">
-		<input
-			type="range"
-			id="datelo"
-			class="lo"
-			value={dLo}
-			min="0"
-			max={totalDays}
-			disabled={totalDays === 0}
-			oninput={onDateLo}
-			onchange={commitDateLo}
-		/>
-		<input
-			type="range"
-			class="hi"
-			value={dHi}
-			min="0"
-			max={totalDays}
-			disabled={totalDays === 0}
-			oninput={onDateHi}
-			onchange={commitDateHi}
-		/>
-	</span>
-	<span>{totalDays > 0 ? `${dateOf(dLo)} – ${dateOf(dHi)}` : "… – …"}</span>
-</div>
-<div class="control">
-	<label for="nodecolor">Node colour</label>
-	<select id="nodecolor" bind:value={nodeColor}>
-		<option value="jersey">Jersey number</option>
-		<option value="team">Team</option>
-		<option value="neutral">Neutral</option>
-	</select>
-</div>
-<div class="control">
-	<label for="edgecolor">Edge colour</label>
-	<select id="edgecolor" value={edgeColor} onchange={(e) => { edgeColor = e.currentTarget.value; onEdgeColor(edgeColor); }}>
-		<option value="none">Shared matches</option>
-		<option value="winrate">Avg win rate</option>
-	</select>
-</div>
-<div class="control">
-	<label for="edgealphaLo">Edge alpha</label>
-	<div class="range-row">
-		<span class="endval">{alphaMin.toFixed(2)}</span>
-		<span class="dual" style="--lo:{alphaMin * 100}%;--hi:{alphaMax * 100}%">
-			<input id="edgealphaLo" class="lo" type="range" min="0.05" max="1" step="0.05" value={alphaMin} oninput={(e) => { alphaMin = +e.currentTarget.value; onEdgeAlpha(alphaMin, alphaMax); }} />
-			<input id="edgealphaHi" class="hi" type="range" min="0.05" max="1" step="0.05" value={alphaMax} oninput={(e) => { alphaMax = +e.currentTarget.value; onEdgeAlpha(alphaMin, alphaMax); }} />
-		</span>
-		<span class="endval">{alphaMax.toFixed(2)}</span>
-	</div>
+
+<!-- Mobile: a single "Filters" dropdown with everything grouped -->
+<div class="hidden" bind:this={filtersMenuEl}>
+	<button
+		type="button"
+		class="btn btn-primary btn-sm"
+		onclick={() => (filtersOpen = !filtersOpen)}
+	>
+		Filters
+	</button>
+	{#if filtersOpen}
+		<div
+			class="absolute left-0 z-40 mt-2 w-72 max-w-[90vw] rounded-box border border-base-200 bg-base-100 p-4 shadow-xl"
+		>
+			{@render filterControls()}
+		</div>
+	{/if}
 </div>
