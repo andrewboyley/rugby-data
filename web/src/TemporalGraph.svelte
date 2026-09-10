@@ -4,7 +4,9 @@
   import { createGridOverlay, type GridOverlay } from "./graph/grid";
   import { fitAll } from "./graph/camera";
   import { TimelineController } from "./TimelineController";
-  import { selectRendererAdapter } from "./graph/renderer";
+  import { RenderScheduler } from "./graph/RenderScheduler";
+  import { selectRendererAdapter, v4Renderer } from "./graph/renderer";
+  import type { SigmaV4SceneRendererHandle } from "./graph/SigmaV4SceneRenderer";
   import { createTemporalEdgeReducer, createTemporalNodeReducer } from "./graph/reducers";
   import type { DatasetLike } from "./temporal/types";
 
@@ -19,6 +21,7 @@
   let seekRequests = $state(0);
   let seekApplies = $state(0);
   let sigma: Sigma | null = null;
+  let renderScheduler: RenderScheduler | null = null;
   let gridOverlay: GridOverlay | null = null;
   let cameraFrame: number | null = null;
   let gridFrame: number | null = null;
@@ -76,11 +79,18 @@
     constructed = nextController;
     controller = nextController;
     updateTopologyStats(nextController);
-    const renderer = selectRendererAdapter({ advancedAdapterVerified: false }, null);
-    sigma = untrack(() => renderer.create(nextController.graph, graphHost, {
-      nodeReducer: createTemporalNodeReducer({ graph: () => nextController.graph, temporalIndex: () => nextController.temporalIndex, time: () => time, teamId: () => filters.teamId, minMatchCount: () => filters.minMatchCount, edgeColorMode: () => filters.edgeColorMode, selectedId: () => filters.selectedId, partnerId: () => filters.partnerId, matchPlayerIds: () => filters.matchPlayerIds }),
-      edgeReducer: createTemporalEdgeReducer({ graph: () => nextController.graph, temporalIndex: () => nextController.temporalIndex, time: () => time, teamId: () => filters.teamId, minMatchCount: () => filters.minMatchCount, edgeColorMode: () => filters.edgeColorMode, selectedId: () => filters.selectedId, partnerId: () => filters.partnerId, matchPlayerIds: () => filters.matchPlayerIds }),
-    }));
+    const useV4 = untrack(() => true);
+    let sceneHandle: SigmaV4SceneRendererHandle | null = null;
+    if (useV4 && v4Renderer.sceneRenderer) {
+      sceneHandle = v4Renderer.sceneRenderer(nextController.graph, graphHost, []);
+      sigma = sceneHandle.sigma;
+    } else {
+      const renderer = selectRendererAdapter({ advancedAdapterVerified: false }, null);
+      sigma = untrack(() => renderer.create(nextController.graph, graphHost, {
+        nodeReducer: createTemporalNodeReducer({ graph: () => nextController.graph, temporalIndex: () => nextController.temporalIndex, time: () => time, teamId: () => filters.teamId, minMatchCount: () => filters.minMatchCount, edgeColorMode: () => filters.edgeColorMode, selectedId: () => filters.selectedId, partnerId: () => filters.partnerId, matchPlayerIds: () => filters.matchPlayerIds }),
+        edgeReducer: createTemporalEdgeReducer({ graph: () => nextController.graph, temporalIndex: () => nextController.temporalIndex, time: () => time, teamId: () => filters.teamId, minMatchCount: () => filters.minMatchCount, edgeColorMode: () => filters.edgeColorMode, selectedId: () => filters.selectedId, partnerId: () => filters.partnerId, matchPlayerIds: () => filters.matchPlayerIds }),
+      }));
+    }
     gridOverlay = createGridOverlay(graphHost, { getSigma: () => sigma, getShow: () => grid });
     const onCameraInput = () => {
       if (cameraFrame !== null) cancelAnimationFrame(cameraFrame);
@@ -92,16 +102,23 @@
     };
     graphHost.addEventListener("wheel", onCameraInput, { capture: true, passive: true });
     graphHost.addEventListener("mousedown", onCameraInput, true);
-    nextController.attachRenderer(sigma);
+    renderScheduler = new RenderScheduler({
+      renderer: sceneHandle?.renderer ?? { render: sigma!.refresh.bind(sigma!) },
+      process: ({ seekTime }) => {
+        if (seekTime !== null) nextController.applyScheduledSeek(seekTime);
+        updateTopologyStats(nextController);
+      },
+    });
+    nextController.attachRenderScheduler(renderScheduler);
     graphHost.dataset.cameraState = JSON.stringify(sigma.getCamera().getState());
     sigma.on("clickNode", ({ node }) => notifySelection(node));
     notifyReady(nextController);
-    return () => { if (cameraFrame !== null) cancelAnimationFrame(cameraFrame); if (gridFrame !== null) cancelAnimationFrame(gridFrame); if (trailFrame !== null) cancelAnimationFrame(trailFrame); graphHost.removeEventListener("wheel", onCameraInput, true); graphHost.removeEventListener("mousedown", onCameraInput, true); gridOverlay?.destroy(); gridOverlay = null; sigma?.kill(); nextController.dispose(); sigma = null; controller = null; };
+    return () => { if (cameraFrame !== null) cancelAnimationFrame(cameraFrame); if (gridFrame !== null) cancelAnimationFrame(gridFrame); if (trailFrame !== null) cancelAnimationFrame(trailFrame); graphHost.removeEventListener("wheel", onCameraInput, true); graphHost.removeEventListener("mousedown", onCameraInput, true); gridOverlay?.destroy(); gridOverlay = null; renderScheduler?.dispose(); renderScheduler = null; sceneHandle?.dispose(); sigma?.kill(); nextController.dispose(); sigma = null; controller = null; };
   });
 
   $effect(() => { if (controller && time !== controller.currentTime) { controller.requestSeek(time); updateTopologyStats(controller); } });
   $effect(() => { time; updateTopologyStats(controller); });
-  $effect(() => { filters.teamId; filters.minMatchCount; filters.edgeColorMode; filters.selectedId; filters.partnerId; filters.matchPlayerIds; time; sigma?.refresh(); });
+  $effect(() => { filters.teamId; filters.minMatchCount; filters.edgeColorMode; filters.selectedId; filters.partnerId; filters.matchPlayerIds; time; renderScheduler?.invalidate("scene", "overlays"); });
   $effect(() => { grid; if (gridFrame !== null) cancelAnimationFrame(gridFrame); gridFrame = requestAnimationFrame(() => { gridFrame = null; gridOverlay?.draw(); }); });
   $effect(() => { autoFit; fitRequest; if (autoFit) fitGraph(); });
   $effect(() => { trails; if (trailFrame !== null) cancelAnimationFrame(trailFrame); trailFrame = requestAnimationFrame(drawTrails); });

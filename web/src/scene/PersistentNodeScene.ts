@@ -1,12 +1,15 @@
 import { pairKey, pairNodes } from "../temporal/types";
 import type { NodeId, PairKey } from "../temporal/types";
 import type { Delta, EdgeDelta } from "../temporal/types";
+import { projectBoundedEdges } from "./edgeDetailPolicy";
+import type { EdgeDetailContext } from "./edgeDetailPolicy";
 import {
   createSceneSlotStorage,
   dirtyRanges,
   type SceneNodeRecord,
   type ScenePatch,
   type SceneSlotStorage,
+  type PositionSnapshot,
 } from "./scene";
 
 export type NodeTransitionPhase = "inactive" | "entering" | "active" | "leaving";
@@ -16,6 +19,11 @@ export type ActiveTransition = Readonly<{
   phase: "entering" | "leaving";
   startedAt: number;
   durationMs: number;
+}>;
+
+type NodeActiveTransition = ActiveTransition & Readonly<{
+  startAlpha: number;
+  startScale: number;
 }>;
 
 export type SceneDisplayContext = Readonly<{
@@ -45,13 +53,15 @@ export class PersistentNodeScene {
   private readonly slotById: ReadonlyMap<NodeId, number>;
   private readonly activeSet: Set<NodeId>;
   private readonly phaseMap: Map<NodeId, NodeTransitionPhase>;
-  private readonly transitions: Map<NodeId, ActiveTransition>;
+  private readonly transitions: Map<NodeId, NodeActiveTransition>;
   private readonly enterDurationMs: number;
   private readonly leaveDurationMs: number;
   private readonly edgeSlotByKey: Map<PairKey, number>;
   private readonly edgeSlotKeys: (PairKey | null)[];
   private readonly freeEdgeSlots: number[];
   private readonly edgeTransitions: Map<PairKey, ActiveTransition>;
+  private lastPositionSequence = 0;
+  private hasPositionSnapshot = false;
 
   constructor(
     records: readonly SceneNodeRecord[],
@@ -125,6 +135,84 @@ export class PersistentNodeScene {
     };
   }
 
+  projectEdges(
+    activeEdges: readonly EdgeDelta[],
+    ordinaryBudget: number,
+    context: EdgeDetailContext,
+    now: number,
+  ): ScenePatch {
+    const projected = projectBoundedEdges(activeEdges, ordinaryBudget, context);
+    if (projected.length > this.slots.edges.capacity) {
+      throw new RangeError("edge capacity cannot hold projected reserved edges");
+    }
+
+    const projectedKeys = new Set(projected.map((edge) => pairKey(edge.source, edge.target)));
+    const dirtyEdgeSlots: number[] = [];
+    for (const key of this.edgeSlotByKey.keys()) {
+      if (!projectedKeys.has(key)) {
+        const [source, target] = pairNodes(key);
+        this.beginEdgeLeave({ source, target }, now, dirtyEdgeSlots);
+      }
+    }
+    for (const edge of projected) {
+      this.writeEdgeDetail(edge, now, dirtyEdgeSlots);
+    }
+
+    return {
+      dirty: { nodes: [], edges: dirtyRanges(dirtyEdgeSlots) },
+      edgeSlots: dirtyEdgeSlots,
+    };
+  }
+
+  applyPositionSnapshot(snapshot: PositionSnapshot): ScenePatch {
+    const nodeCount = this.slots.nodes.records.length;
+    if (snapshot.sequence <= this.lastPositionSequence) {
+      return { dirty: { nodes: [], edges: [] }, nodeSlots: [], edgeSlots: [] };
+    }
+    if (snapshot.positions.length !== nodeCount * 2) {
+      throw new RangeError("position snapshot does not match scene node slots");
+    }
+
+    const nodeSlots: number[] = [];
+    for (let slot = 0; slot < nodeCount; slot += 1) {
+      const offset = slot * 2;
+      const x = snapshot.positions[offset]!;
+      const y = snapshot.positions[offset + 1]!;
+      if (this.hasPositionSnapshot) {
+        this.slots.nodes.previousX[slot] = this.slots.nodes.currentX[slot]!;
+        this.slots.nodes.previousY[slot] = this.slots.nodes.currentY[slot]!;
+      } else {
+        this.slots.nodes.previousX[slot] = x;
+        this.slots.nodes.previousY[slot] = y;
+      }
+      this.slots.nodes.currentX[slot] = x;
+      this.slots.nodes.currentY[slot] = y;
+      nodeSlots.push(slot);
+    }
+    this.hasPositionSnapshot = true;
+    this.lastPositionSequence = snapshot.sequence;
+    return { dirty: { nodes: dirtyRanges(nodeSlots), edges: [] }, nodeSlots, edgeSlots: [] };
+  }
+
+  interpolatePositions(progress: number): ScenePatch {
+    const t = Math.max(0, Math.min(1, progress));
+    const nodeSlots: number[] = [];
+    for (let slot = 0; slot < this.slots.nodes.records.length; slot += 1) {
+      this.slots.nodes.x[slot] = this.interpolate(
+        this.slots.nodes.previousX[slot]!,
+        this.slots.nodes.currentX[slot]!,
+        t,
+      );
+      this.slots.nodes.y[slot] = this.interpolate(
+        this.slots.nodes.previousY[slot]!,
+        this.slots.nodes.currentY[slot]!,
+        t,
+      );
+      nodeSlots.push(slot);
+    }
+    return { dirty: { nodes: dirtyRanges(nodeSlots), edges: [] }, nodeSlots, edgeSlots: [] };
+  }
+
   projectDisplay(display: SceneDisplayContext): ScenePatch {
     const nodeSlots: number[] = [];
     const edgeSlots: number[] = [];
@@ -166,14 +254,30 @@ export class PersistentNodeScene {
       if (slot === undefined) continue;
 
       if (transition.phase === "entering") {
-        this.slots.nodes.alpha[slot] = t * ACTIVE_ALPHA;
+        this.slots.nodes.alpha[slot] = this.interpolate(
+          transition.startAlpha,
+          ACTIVE_ALPHA,
+          t,
+        );
         this.slots.nodes.targetAlpha[slot] = ACTIVE_ALPHA;
-        this.slots.nodes.scale[slot] = INACTIVE_SCALE + t * (ACTIVE_SCALE - INACTIVE_SCALE);
+        this.slots.nodes.scale[slot] = this.interpolate(
+          transition.startScale,
+          ACTIVE_SCALE,
+          t,
+        );
         this.slots.nodes.targetScale[slot] = ACTIVE_SCALE;
       } else {
-        this.slots.nodes.alpha[slot] = (1 - t) * ACTIVE_ALPHA;
+        this.slots.nodes.alpha[slot] = this.interpolate(
+          transition.startAlpha,
+          INACTIVE_ALPHA,
+          t,
+        );
         this.slots.nodes.targetAlpha[slot] = INACTIVE_ALPHA;
-        this.slots.nodes.scale[slot] = ACTIVE_SCALE - t * (ACTIVE_SCALE - INACTIVE_SCALE);
+        this.slots.nodes.scale[slot] = this.interpolate(
+          transition.startScale,
+          INACTIVE_SCALE,
+          t,
+        );
         this.slots.nodes.targetScale[slot] = INACTIVE_SCALE;
       }
 
@@ -193,6 +297,7 @@ export class PersistentNodeScene {
         this.slots.nodes.scale[slot] = ACTIVE_SCALE;
         this.slots.nodes.targetScale[slot] = ACTIVE_SCALE;
         this.slots.nodes.interactive[slot] = 1;
+        this.slots.nodes.transitioning[slot] = 0;
       } else {
         this.phaseMap.set(nodeId, "inactive");
         this.slots.nodes.alpha[slot] = INACTIVE_ALPHA;
@@ -200,6 +305,7 @@ export class PersistentNodeScene {
         this.slots.nodes.scale[slot] = INACTIVE_SCALE;
         this.slots.nodes.targetScale[slot] = INACTIVE_SCALE;
         this.slots.nodes.interactive[slot] = 0;
+        this.slots.nodes.transitioning[slot] = 0;
       }
 
       dirtyNodeSlots.push(slot);
@@ -260,20 +366,25 @@ export class PersistentNodeScene {
     const existing = this.transitions.get(nodeId);
     if (existing?.phase === "entering") return;
 
+    const slot = this.slotById.get(nodeId);
+    if (slot === undefined) return;
+
+    if (this.phaseMap.get(nodeId) === "inactive") {
+      this.slots.nodes.alpha[slot] = INACTIVE_ALPHA;
+      this.slots.nodes.scale[slot] = INACTIVE_SCALE;
+    }
+
     this.activeSet.add(nodeId);
     this.phaseMap.set(nodeId, "entering");
     this.transitions.set(nodeId, {
       phase: "entering",
       startedAt: now,
       durationMs: this.enterDurationMs,
+      startAlpha: this.slots.nodes.alpha[slot],
+      startScale: this.slots.nodes.scale[slot],
     });
 
-    const slot = this.slotById.get(nodeId);
-    if (slot === undefined) return;
-
-    this.slots.nodes.alpha[slot] = INACTIVE_ALPHA;
     this.slots.nodes.targetAlpha[slot] = ACTIVE_ALPHA;
-    this.slots.nodes.scale[slot] = INACTIVE_SCALE;
     this.slots.nodes.targetScale[slot] = ACTIVE_SCALE;
     this.slots.nodes.interactive[slot] = 0;
     this.slots.nodes.transitioning[slot] = 1;
@@ -287,14 +398,17 @@ export class PersistentNodeScene {
 
     this.activeSet.delete(nodeId);
     this.phaseMap.set(nodeId, "leaving");
+
+    const slot = this.slotById.get(nodeId);
+    if (slot === undefined) return;
+
     this.transitions.set(nodeId, {
       phase: "leaving",
       startedAt: now,
       durationMs: this.leaveDurationMs,
+      startAlpha: this.slots.nodes.alpha[slot],
+      startScale: this.slots.nodes.scale[slot],
     });
-
-    const slot = this.slotById.get(nodeId);
-    if (slot === undefined) return;
 
     this.slots.nodes.interactive[slot] = 0;
     this.slots.nodes.transitioning[slot] = 1;
@@ -415,6 +529,10 @@ export class PersistentNodeScene {
 
   private edgeScaleFor(count: number): number {
     return MIN_EDGE_SCALE + Math.log2(count + 1);
+  }
+
+  private interpolate(start: number, target: number, progress: number): number {
+    return start + progress * (target - start);
   }
 
   private nodeIsDimmed(record: SceneNodeRecord, display: SceneDisplayContext): boolean {

@@ -60,7 +60,7 @@ test.describe("End-user acceptance: temporal viewer", () => {
     await expect(graph).toHaveAttribute("data-edge-count", "7");
     await expect(page.getByTestId("timeline-label")).toHaveText("2020-01-07");
     await slider.press("Home");
-     await expect(graph).toHaveAttribute("data-node-count", "6");
+     await expect(graph).toHaveAttribute("data-node-count", "4");
     await expect(graph).toHaveAttribute("data-edge-count", "2");
     await expect(page.getByTestId("timeline-label")).toHaveText("2020-01-01");
   });

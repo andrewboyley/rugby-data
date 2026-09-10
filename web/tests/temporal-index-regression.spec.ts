@@ -98,6 +98,47 @@ test("persistent FA2 paces worker continuations and cancels the pending task on 
   expect(calls).toEqual(["start", "kill"]);
 });
 
+test("persistent FA2 publishes indexed position snapshots through owned double buffers", () => {
+  const graph = new UndirectedGraph();
+  graph.addNode("second", { x: 0, y: 0, size: 1, temporalIndex: 1 });
+  graph.addNode("first", { x: 0, y: 0, size: 1, temporalIndex: 0 });
+  let onMessage: ((event: MessageEvent<{ nodes: ArrayBuffer }>) => void) | undefined;
+  const worker = {
+    addEventListener: (_type: string, callback: typeof onMessage) => onMessage = callback,
+    removeEventListener: () => {},
+  };
+  const publications: (() => void)[] = [];
+  const layout = new PersistentForceAtlas2(graph, {
+    create: () => ({ worker, start: () => {}, kill: () => {}, askForIterations: () => {} }),
+    scheduler: { schedule: () => 0, cancel: () => {} },
+    publicationScheduler: {
+      schedule: (callback) => {
+        publications.push(callback);
+        return publications.length;
+      },
+      cancel: () => {},
+    },
+  });
+  const snapshots: { sequence: number; positions: Float32Array }[] = [];
+  layout.subscribe((snapshot) => snapshots.push(snapshot));
+  layout.start();
+
+  onMessage?.(new MessageEvent("message", {
+    data: { nodes: new Float32Array([20, 21, 0, 0, 0, 0, 0, 0, 0, 0, 10, 11, 0, 0, 0, 0, 0, 0, 0, 0]).buffer },
+  }));
+  onMessage?.(new MessageEvent("message", {
+    data: { nodes: new Float32Array([40, 41, 0, 0, 0, 0, 0, 0, 0, 0, 30, 31, 0, 0, 0, 0, 0, 0, 0, 0]).buffer },
+  }));
+
+  expect(publications).toHaveLength(1);
+  publications.shift()?.();
+
+  expect(snapshots).toHaveLength(1);
+  expect(snapshots[0]!.sequence).toBe(1);
+  expect(snapshots[0]!.positions).toEqual(new Float32Array([30, 31, 40, 41]));
+  layout.kill();
+});
+
 test("supergraph positions are deterministic and independent of Math.random", () => {
   const timeline = MatchTimeline.fromDataset(dataset);
   const first = createTemporalSupergraph(dataset, new TemporalIndex(timeline)).graph;

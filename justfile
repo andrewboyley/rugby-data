@@ -69,7 +69,7 @@ test-web *args:
 
 # Run the OpenSpec-driven Ralph builder. Usage: just ralph [iterations]
 ralph iterations="100":
-    ralph --prompt-file .ralph/prompt.md --agent opencode --allow-all --no-commit --no-questions --max-iterations {{ iterations }} --completion-promise COMPLETE --abort-promise BLOCKED
+    ralph --prompt-file .ralph/prompt.md --agent opencode --allow-all --no-commit --no-questions --max-iterations {{ iterations }} --completion-promise COMPLETE --abort-promise BLOCKED --model opencode/big-pickle
 
 # Show working-tree status
 status:

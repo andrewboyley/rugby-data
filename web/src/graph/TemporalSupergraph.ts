@@ -6,6 +6,14 @@ export type TemporalSupergraph = Readonly<{
   graph: UndirectedGraph;
 }>;
 
+/**
+ * All-time co-occurrence counts use square-root attraction. This keeps frequent
+ * partnerships stronger without allowing them to dominate every FA2 iteration.
+ */
+export function allTimeLayoutWeight(count: number): number {
+  return Math.sqrt(Math.max(1, count));
+}
+
 export function createTemporalSupergraph(dataset: DatasetLike, temporalIndex: TemporalIndex): TemporalSupergraph {
   const graph = new UndirectedGraph();
   const teamsByNode = new Map<NodeId, Set<number>>();
@@ -42,10 +50,18 @@ export function createTemporalSupergraph(dataset: DatasetLike, temporalIndex: Te
       temporalIndex: temporalEdgeIndex,
       allTimeCount: count,
       matchCount: count,
-      weight: Math.sqrt(count),
+      weight: allTimeLayoutWeight(count),
       size: 0.5 + Math.log2(count + 1),
     });
   });
 
   return Object.freeze({ graph });
+}
+
+/** Creates the immutable, all-time topology owned only by the FA2 worker. */
+export function createAllTimeLayoutTopology(
+  dataset: DatasetLike,
+  temporalIndex: TemporalIndex,
+): TemporalSupergraph {
+  return createTemporalSupergraph(dataset, temporalIndex);
 }

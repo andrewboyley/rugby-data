@@ -1,7 +1,10 @@
-import type Sigma from "sigma";
 import type Graph from "graphology";
 import { PersistentForceAtlas2 } from "./graph/PersistentForceAtlas2";
-import { createTemporalSupergraph } from "./graph/TemporalSupergraph";
+import type { RenderScheduler } from "./graph/RenderScheduler";
+import {
+  createAllTimeLayoutTopology,
+  createTemporalSupergraph,
+} from "./graph/TemporalSupergraph";
 import { MatchTimeline } from "./temporal/MatchTimeline";
 import { TemporalIndex } from "./temporal/TemporalIndex";
 import type { DatasetLike } from "./temporal/types";
@@ -18,14 +21,12 @@ export class TimelineController {
   readonly temporalIndex: TemporalIndex;
   readonly graph: Graph;
   readonly layout: TimelineLayout;
-  private renderer: Sigma | null = null;
+  private scheduler: Pick<RenderScheduler, "invalidate" | "requestSeek"> | null = null;
   private frame: number | null = null;
   private lastFrame = 0;
   private playing = false;
   private speed = 1;
   private playbackEnd: number | null = null;
-  private seekFrame: number | null = null;
-  private pendingSeekTime: number | null = null;
   private seekRequestCount = 0;
   private seekApplyCount = 0;
 
@@ -33,8 +34,10 @@ export class TimelineController {
     this.timeline = MatchTimeline.fromDataset(dataset);
     this.temporalIndex = new TemporalIndex(this.timeline);
     this.graph = createTemporalSupergraph(dataset, this.temporalIndex).graph;
-    this.layout = createLayout(this.graph);
-    this.seek(initialPosition === "max" ? this.timeline.dateMax ?? Number.NEGATIVE_INFINITY : Number.NEGATIVE_INFINITY);
+    this.layout = createLayout(
+      createAllTimeLayoutTopology(dataset, this.temporalIndex).graph,
+    );
+    this.applySeek(initialPosition === "max" ? this.timeline.dateMax ?? Number.NEGATIVE_INFINITY : Number.NEGATIVE_INFINITY);
     this.layout.start();
   }
 
@@ -43,25 +46,29 @@ export class TimelineController {
   get activeEdgeCount(): number { return this.temporalIndex.activeEdgeCount; }
   get seekRequests(): number { return this.seekRequestCount; }
   get seekApplies(): number { return this.seekApplyCount; }
-  attachRenderer(renderer: Sigma): void { this.renderer = renderer; }
+  attachRenderScheduler(scheduler: Pick<RenderScheduler, "invalidate" | "requestSeek">): void {
+    this.scheduler = scheduler;
+  }
   requestSeek(time: number): void {
     this.seekRequestCount += 1;
-    this.pendingSeekTime = time;
-    if (this.seekFrame !== null) return;
-    this.seekFrame = requestAnimationFrame(() => {
-      this.seekFrame = null;
-      const pendingTime = this.pendingSeekTime;
-      this.pendingSeekTime = null;
-      if (pendingTime === null) return;
-      this.seekApplyCount += 1;
-      this.seek(pendingTime);
-    });
+    if (this.scheduler) {
+      this.scheduler.requestSeek(time);
+      return;
+    }
+    this.seekApplyCount += 1;
+    this.applySeek(time);
   }
   seek(time: number): void {
-    this.cancelPendingSeek();
+    this.applySeek(time);
+    this.scheduler?.invalidate("timeline");
+  }
+  applySeek(time: number): void {
     this.temporalIndex.seek(time);
-    this.renderer?.refresh();
     this.onChange(this.currentTime);
+  }
+  applyScheduledSeek(time: number): void {
+    this.seekApplyCount += 1;
+    this.applySeek(time);
   }
   /** Seek an existing simulation to either UI initial state without replacing it. */
   reset(position: "min" | "max"): void {
@@ -79,13 +86,7 @@ export class TimelineController {
   }
   pause(): void { const wasPlaying = this.playing; this.playing = false; if (this.frame !== null) cancelAnimationFrame(this.frame); this.frame = null; if (wasPlaying) this.onPlayingChange(false); }
   isPlaying(): boolean { return this.playing; }
-  dispose(): void { this.pause(); this.cancelPendingSeek(); this.layout.kill(); this.renderer = null; }
-
-  private cancelPendingSeek(): void {
-    if (this.seekFrame !== null) cancelAnimationFrame(this.seekFrame);
-    this.seekFrame = null;
-    this.pendingSeekTime = null;
-  }
+  dispose(): void { this.pause(); this.layout.kill(); this.scheduler = null; }
 
   private tick(now: number): void {
     if (!this.playing) return;

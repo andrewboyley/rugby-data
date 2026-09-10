@@ -1,5 +1,6 @@
 import FA2Layout from "graphology-layout-forceatlas2/worker.js";
 import type Graph from "graphology";
+import type { PositionSnapshot } from "../scene/scene";
 
 type Matrix = { nodes: Float32Array; edges: Float32Array };
 type Supervisor = {
@@ -20,6 +21,7 @@ type ContinuationScheduler = {
 type Options = {
   create?: (graph: Graph) => Supervisor;
   scheduler?: ContinuationScheduler;
+  publicationScheduler?: ContinuationScheduler;
 };
 
 const topologyEvents = ["nodeAdded", "nodeDropped", "edgeAdded", "edgeDropped", "edgeAttributesUpdated"] as const;
@@ -27,6 +29,16 @@ const iterationDelayMs = 100;
 const iterationScheduler: ContinuationScheduler = {
   schedule: (callback) => window.setTimeout(callback, iterationDelayMs),
   cancel: (handle) => window.clearTimeout(handle),
+};
+const publicationScheduler: ContinuationScheduler = {
+  schedule: (callback) => {
+    if (typeof requestAnimationFrame === "function") return requestAnimationFrame(callback);
+    return globalThis.setTimeout(callback, 0) as unknown as number;
+  },
+  cancel: (handle) => {
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(handle);
+    else globalThis.clearTimeout(handle);
+  },
 };
 let nextWorkerIdentity = 1;
 
@@ -39,14 +51,23 @@ let nextWorkerIdentity = 1;
 export class PersistentForceAtlas2 {
   private readonly layout: Supervisor;
   private readonly scheduler: ContinuationScheduler;
+  private readonly publicationScheduler: ContinuationScheduler;
   private readonly workerIdentity = nextWorkerIdentity++;
   private running = false;
   private topologyDirty = false;
   private reloads = 0;
   private continuationHandle: number | null = null;
+  private publicationHandle: number | null = null;
+  private readonly positionSlots: readonly number[];
+  private readonly positionBuffers: readonly [Float32Array, Float32Array];
+  private readonly positionListeners = new Set<(snapshot: PositionSnapshot) => void>();
+  private publishedBuffer = 0;
+  private positionSequence = 0;
+  private pendingPositions: Float32Array | null = null;
 
   constructor(private readonly graph: Graph, options: Options = {}) {
     this.scheduler = options.scheduler ?? iterationScheduler;
+    this.publicationScheduler = options.publicationScheduler ?? publicationScheduler;
     this.layout = options.create?.(graph) ?? new FA2Layout(graph, {
       getEdgeWeight: "weight",
       settings: { barnesHutOptimize: true, barnesHutTheta: 0.5, edgeWeightInfluence: 1, gravity: 1, scalingRatio: 10, slowDown: 1 },
@@ -60,11 +81,23 @@ export class PersistentForceAtlas2 {
     const worker = this.layout.worker as Worker | undefined;
     if (worker && this.layout.handleMessage) worker.removeEventListener("message", this.layout.handleMessage as EventListener);
     worker?.addEventListener("message", this.handleMessage as EventListener);
+
+    this.positionSlots = graph.nodes().map((node, workerIndex) => {
+      const slot = Number(graph.getNodeAttribute(node, "temporalIndex"));
+      return Number.isSafeInteger(slot) && slot >= 0 ? slot : workerIndex;
+    });
+    const positionCount = graph.order * 2;
+    this.positionBuffers = [new Float32Array(positionCount), new Float32Array(positionCount)];
   }
 
   get worker(): unknown { return this.layout.worker; }
   get identity(): number { return this.workerIdentity; }
   get topologyReloads(): number { return this.reloads; }
+
+  subscribe(listener: (snapshot: PositionSnapshot) => void): () => void {
+    this.positionListeners.add(listener);
+    return () => this.positionListeners.delete(listener);
+  }
 
   start(): void {
     if (this.running) return;
@@ -83,6 +116,9 @@ export class PersistentForceAtlas2 {
     this.running = false;
     if (this.continuationHandle !== null) this.scheduler.cancel(this.continuationHandle);
     this.continuationHandle = null;
+    if (this.publicationHandle !== null) this.publicationScheduler.cancel(this.publicationHandle);
+    this.publicationHandle = null;
+    this.pendingPositions = null;
     this.layout.kill();
   }
 
@@ -105,9 +141,37 @@ export class PersistentForceAtlas2 {
       index += 10;
       return attrs;
     });
+    this.queuePositionPublication(nodes);
     if (this.layout.matrices) this.layout.matrices.nodes = nodes;
     this.scheduleIterations();
   };
+
+  /** Keeps only newest worker result until scene can consume one frame snapshot. */
+  private queuePositionPublication(nodes: Float32Array): void {
+    this.pendingPositions = nodes;
+    if (this.publicationHandle !== null) return;
+    this.publicationHandle = this.publicationScheduler.schedule(() => {
+      this.publicationHandle = null;
+      const pending = this.pendingPositions;
+      this.pendingPositions = null;
+      if (!this.running || pending === null) return;
+      this.publishPositions(pending);
+    });
+  }
+
+  /** Publishes alternating owned buffers so consumers never observe a write in progress. */
+  private publishPositions(nodes: Float32Array): void {
+    const positions = this.positionBuffers[this.publishedBuffer]!;
+    this.positionSlots.forEach((slot, workerIndex) => {
+      const workerOffset = workerIndex * 10;
+      const sceneOffset = slot * 2;
+      positions[sceneOffset] = nodes[workerOffset]!;
+      positions[sceneOffset + 1] = nodes[workerOffset + 1]!;
+    });
+    this.publishedBuffer = this.publishedBuffer === 0 ? 1 : 0;
+    const snapshot = Object.freeze({ sequence: ++this.positionSequence, positions });
+    for (const listener of this.positionListeners) listener(snapshot);
+  }
 
   private scheduleIterations(withEdges = false): void {
     if (this.continuationHandle !== null) return;

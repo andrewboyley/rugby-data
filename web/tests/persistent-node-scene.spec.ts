@@ -25,6 +25,29 @@ test("constructs with one slot per record and all nodes inactive", () => {
   expect(scene.hasActiveTransition()).toBe(false);
 });
 
+test("applies position snapshots and interpolates previous/current coordinates in scene slots", () => {
+  const scene = new PersistentNodeScene(records, 0);
+  const first = scene.applyPositionSnapshot({ sequence: 1, positions: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) });
+  const second = scene.applyPositionSnapshot({ sequence: 2, positions: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]) });
+  const patch = scene.interpolatePositions(0.5);
+
+  expect(first.nodeSlots).toEqual([0, 1, 2, 3]);
+  expect(second.nodeSlots).toEqual([0, 1, 2, 3]);
+  expect(patch.nodeSlots).toEqual([0, 1, 2, 3]);
+  expect(scene.slots.nodes.previousX).toEqual(new Float32Array([1, 3, 5, 7]));
+  expect(scene.slots.nodes.currentX).toEqual(new Float32Array([11, 13, 15, 17]));
+  expect(scene.slots.nodes.x).toEqual(new Float32Array([6, 8, 10, 12]));
+  expect(scene.slots.nodes.y).toEqual(new Float32Array([7, 9, 11, 13]));
+});
+
+test("ignores stale position snapshots and rejects mismatched slot counts", () => {
+  const scene = new PersistentNodeScene(records, 0);
+  scene.applyPositionSnapshot({ sequence: 2, positions: new Float32Array(8) });
+
+  expect(scene.applyPositionSnapshot({ sequence: 1, positions: new Float32Array(8) }).nodeSlots).toEqual([]);
+  expect(() => scene.applyPositionSnapshot({ sequence: 3, positions: new Float32Array(6) })).toThrow(RangeError);
+});
+
 test("projectDelta marks added nodes as entering with correct initial visual state", () => {
   const scene = new PersistentNodeScene(records, 0);
   const patch = scene.projectDelta(makeDelta({ addNodes: ["p1", "c1"] }), 0);
@@ -78,7 +101,7 @@ test("advanceTransitions interpolates entering nodes and completes at ENTER_DURA
   expect(scene.slots.nodes.alpha[slot]).toBe(1);
   expect(scene.slots.nodes.scale[slot]).toBe(1);
   expect(scene.slots.nodes.interactive[slot]).toBe(1);
-  expect(scene.slots.nodes.transitioning[slot]).toBe(1);
+  expect(scene.slots.nodes.transitioning[slot]).toBe(0);
   expect(scene.hasActiveTransition()).toBe(false);
   expect(completePatch.nodeSlots).toContain(slot);
 });
@@ -102,6 +125,7 @@ test("advanceTransitions interpolates leaving nodes and completes at LEAVE_DURAT
   expect(scene.slots.nodes.alpha[slot]).toBe(0);
   expect(scene.slots.nodes.scale[slot]).toBeCloseTo(0.55, 5);
   expect(scene.slots.nodes.interactive[slot]).toBe(0);
+  expect(scene.slots.nodes.transitioning[slot]).toBe(0);
   expect(scene.hasActiveTransition()).toBe(false);
   expect(completePatch.nodeSlots).toContain(slot);
 });
@@ -161,6 +185,37 @@ test("beginLeave is ignored for already leaving nodes", () => {
   const patch = scene.projectDelta(makeDelta({ removeNodes: ["p1"] }), ENTER_DURATION_MS + 10);
   expect(scene.getPhase("p1")).toBe("leaving");
   expect(patch.nodeSlots).toHaveLength(0);
+});
+
+test("replaces in-flight targets without resetting node visual state", () => {
+  const scene = new PersistentNodeScene(records, 0);
+  const slot = scene.slots.nodes.slotById.get("p1")!;
+
+  scene.projectDelta(makeDelta({ addNodes: ["p1"] }), 0);
+  scene.advanceTransitions(ENTER_DURATION_MS / 2);
+  const enteringAlpha = scene.slots.nodes.alpha[slot];
+  const enteringScale = scene.slots.nodes.scale[slot];
+
+  scene.projectDelta(makeDelta({ removeNodes: ["p1"] }), ENTER_DURATION_MS / 2);
+  expect(scene.getPhase("p1")).toBe("leaving");
+  expect(scene.slots.nodes.alpha[slot]).toBe(enteringAlpha);
+  expect(scene.slots.nodes.scale[slot]).toBe(enteringScale);
+  expect(scene.slots.nodes.interactive[slot]).toBe(0);
+
+  scene.advanceTransitions(ENTER_DURATION_MS / 2 + LEAVE_DURATION_MS / 2);
+  const leavingAlpha = scene.slots.nodes.alpha[slot];
+  const leavingScale = scene.slots.nodes.scale[slot];
+
+  scene.projectDelta(makeDelta({ addNodes: ["p1"] }), ENTER_DURATION_MS / 2 + LEAVE_DURATION_MS / 2);
+  expect(scene.getPhase("p1")).toBe("entering");
+  expect(scene.slots.nodes.alpha[slot]).toBe(leavingAlpha);
+  expect(scene.slots.nodes.scale[slot]).toBe(leavingScale);
+
+  scene.advanceTransitions(ENTER_DURATION_MS / 2 + LEAVE_DURATION_MS / 2 + ENTER_DURATION_MS);
+  expect(scene.getPhase("p1")).toBe("active");
+  expect(scene.slots.nodes.alpha[slot]).toBe(1);
+  expect(scene.slots.nodes.scale[slot]).toBe(1);
+  expect(scene.slots.nodes.interactive[slot]).toBe(1);
 });
 
 test("multiple simultaneous adds produce dirty ranges covering all affected slots", () => {

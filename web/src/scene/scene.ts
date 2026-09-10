@@ -36,6 +36,8 @@ export type NodeSlotStorage = Readonly<{
   previousY: Float32Array;
   currentX: Float32Array;
   currentY: Float32Array;
+  x: Float32Array;
+  y: Float32Array;
   interactive: Uint8Array;
   transitioning: Uint8Array;
 }>;
@@ -111,6 +113,8 @@ export function createSceneSlotStorage(
       previousY: new Float32Array(nodeCount),
       currentX: new Float32Array(nodeCount),
       currentY: new Float32Array(nodeCount),
+      x: new Float32Array(nodeCount),
+      y: new Float32Array(nodeCount),
       interactive: new Uint8Array(nodeCount),
       transitioning: new Uint8Array(nodeCount),
     }),

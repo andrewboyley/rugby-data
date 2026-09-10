@@ -2,7 +2,10 @@ import { expect, test } from "@playwright/test";
 import type Graph from "graphology";
 import { TimelineController } from "../src/TimelineController";
 import type { TimelineLayout } from "../src/TimelineController";
-import { createTemporalSupergraph } from "../src/graph/TemporalSupergraph";
+import {
+  allTimeLayoutWeight,
+  createTemporalSupergraph,
+} from "../src/graph/TemporalSupergraph";
 import { TemporalIndex } from "../src/temporal/TemporalIndex";
 import { MatchTimeline } from "../src/temporal/MatchTimeline";
 
@@ -77,6 +80,67 @@ test("timeline controller seeks only TemporalIndex state after the supergraph is
   expect(controller.layout).toBe(layout);
   expect(controller.layout.topologyReloads).toBe(0);
   expect(starts).toBe(1);
+  controller.dispose();
+  expect(kills).toBe(1);
+});
+
+test("timeline seeks preserve private FA2 topology, worker, and player positions", () => {
+  let layoutGraph: Graph | null = null;
+  let layoutCreations = 0;
+  let starts = 0;
+  let kills = 0;
+  const layout: TimelineLayout = {
+    identity: 72,
+    topologyReloads: 0,
+    start: () => { starts += 1; },
+    kill: () => { kills += 1; },
+  };
+  const controller = new TimelineController(
+    dataset,
+    () => {},
+    () => {},
+    "min",
+    (graph) => {
+      layoutCreations += 1;
+      layoutGraph = graph;
+      return layout;
+    },
+  );
+
+  expect(layoutGraph).not.toBeNull();
+  expect(layoutGraph).not.toBe(controller.graph);
+  expect(graphSnapshot(layoutGraph!)).toBe(graphSnapshot(controller.graph));
+  for (const edge of layoutGraph!.edges()) {
+    const count = Number(layoutGraph!.getEdgeAttribute(edge, "allTimeCount"));
+    expect(layoutGraph!.getEdgeAttribute(edge, "weight")).toBe(
+      allTimeLayoutWeight(count),
+    );
+  }
+
+  const events = ["nodeAdded", "nodeDropped", "edgeAdded", "edgeDropped", "nodeAttributesUpdated", "edgeAttributesUpdated", "eachNodeAttributesUpdated", "eachEdgeAttributesUpdated"];
+  let topologyEvents = 0;
+  for (const event of events) layoutGraph!.on(event, () => { topologyEvents += 1; });
+  layoutGraph!.setNodeAttribute("1", "x", 123.5);
+  layoutGraph!.setNodeAttribute("1", "y", -456.25);
+  const topologySnapshot = graphSnapshot(layoutGraph!);
+  const playerPosition = {
+    x: layoutGraph!.getNodeAttribute("1", "x"),
+    y: layoutGraph!.getNodeAttribute("1", "y"),
+  };
+  topologyEvents = 0;
+
+  const targets = [Number.NEGATIVE_INFINITY, ...controller.timeline.dates];
+  for (let seek = 0; seek < 100; seek += 1) controller.seek(targets[seek % targets.length]);
+
+  expect(layoutCreations).toBe(1);
+  expect(controller.layout).toBe(layout);
+  expect(controller.layout.identity).toBe(72);
+  expect(controller.layout.topologyReloads).toBe(0);
+  expect(starts).toBe(1);
+  expect(topologyEvents).toBe(0);
+  expect(graphSnapshot(layoutGraph!)).toBe(topologySnapshot);
+  expect(layoutGraph!.getNodeAttribute("1", "x")).toBe(playerPosition.x);
+  expect(layoutGraph!.getNodeAttribute("1", "y")).toBe(playerPosition.y);
   controller.dispose();
   expect(kills).toBe(1);
 });
