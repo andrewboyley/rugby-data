@@ -24,12 +24,7 @@ data/*
 /.cocoindex_code/
 
 # Agent / tooling internal state (not project source)
-.opencode/
-.ralph/
 /.cocoindex/
-.cursor/
-.claude/
-.omo/
 
 # Build / test artifacts
 dist/
