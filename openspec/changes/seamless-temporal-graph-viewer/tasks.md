@@ -6,9 +6,9 @@
 
 ## 2. Temporal Scene Domain
 
-- [ ] 2.1 Define library-independent scene records, typed-array slot storage, scene patches, dirty ranges, and renderer/layout ports.
-- [ ] 2.2 Implement the persistent node scene with stable slots for players and coaches, visual target state, interactivity state, and active transition sets.
-- [ ] 2.3 Implement temporal-delta projection into node membership, filter, selection, match, and edge-detail patches without changing temporal-index truth.
+- [x] 2.1 Define library-independent scene records, typed-array slot storage, scene patches, dirty ranges, and renderer/layout ports.
+- [x] 2.2 Implement the persistent node scene with stable slots for players and coaches, visual target state, interactivity state, and active transition sets.
+- [x] 2.3 Implement temporal-delta projection into node membership, filter, selection, match, and edge-detail patches without changing temporal-index truth.
 - [ ] 2.4 Implement transition advancement with latest-target replacement and verify node enter, leave, return, and non-interactive exit behavior.
 - [ ] 2.5 Implement ranked bounded edge projection with reserved selected-player, partner, and match edges; verify full temporal edge facts remain queryable.
 
