@@ -1,158 +1,98 @@
-# Rugby Composition Predictor — Agent Guide
+# Rugby Composition Predictor
 
-## Project Overview
-Builds dataset of international rugby union matches from ESPN CORE API + World Rugby RIMS API, derives player co-occurrence graph, visualises in browser (Svelte + sigma.js).
+This repository builds a cached dataset of international rugby union matches from
+World Rugby RIMS and ESPN, then renders a temporal player/coaching co-occurrence
+graph in a Svelte browser application.
 
-**Data flow:** ESPN/RIMS APIs → `dataset.json` → temporal web viewer
+## Working Rules
 
-## Commands (via `just`)
+- Use CodeGraph to understand symbols and call paths before editing source.
+- Keep changes scoped to the request. Prefer existing utilities and dependencies.
+- Update the relevant existing documentation when a change affects behavior, workflows, interfaces, or data contracts.
+- Do not commit, amend, or push unless the user explicitly asks.
+- Never commit secrets, `.env` files, API responses, cache data, or local server state.
+- Do not hand-edit generated data under `data/`; regenerate it with `just dataset`.
+- Do not run destructive data-cache operations, releases, or dependency upgrades without explicit approval.
 
-| Command | Description |
-|---------|-------------|
-| `just setup` | Install deps (uv sync) |
-| `just dataset` | Build `data/dataset.json` (resumable, cached) |
-| `just build` | Build `data/dataset.json` |
-| `just web` | Build Svelte viewer → `dist/` |
-| `just serve` | Build + preview on `localhost:8787` |
-| `just dev-start/stop/restart/status/logs/follow` | Dev server management |
-| `just check-python` | Type check + compile Python |
-| `just lint-python` | Ruff lint + fix |
-| `just check-web` | TypeScript + svelte-check |
-| `just lint-web` | ESLint + fix |
-| `just commit <type> <summary> [body]` | Conventional commit |
+## Stack And Layout
 
-## ALWAYS use `just` — never raw build tooling
+- Python 3.12+: ingestion CLI and dataset model in `src/rugby_composition_predictor/`.
+- Svelte 5, TypeScript, Vite, Tailwind 4, and daisyUI: browser viewer in `web/`.
+- Graphology, Sigma, and ForceAtlas2: browser graph construction and layout.
+- `data/dataset.json`: generated viewer input. It is ignored by Git and fetched at runtime from `/data/dataset.json`.
+- `tests/`: cache-backed Python diagnostic only; it is not a hermetic test suite.
+- `web/tests/`: Playwright temporal, integration, acceptance, and performance coverage.
+- `docs/graph_architecture.md` and `docs/test_strategy.md`: deeper graph and testing references.
 
-Invoke **every** project task through a `just` recipe. Do **not** run raw
-`npm` / `uv` / `pip` / `cd web && …` commands for anything that has a `just`
-equivalent — the recipes encode the correct working directory, flags, and
-ordering (e.g. `just web` runs `npm ci && vite build` from inside `web/`).
-The agent has historically bypassed `just` and run manual `npm` commands,
-which drifts from the project's intended workflow; do not do that.
+## Commands
 
-If you reach for one of these, use the `just` form instead:
+Run project tasks from the repository root through `just`. Do not use raw `npm`,
+`uv`, `pip`, `npx`, or `cd web && ...` when a recipe exists.
 
-| Instead of | use |
-|------------|-----|
-| `cd web && npm ci` / `npm install` | `just setup` |
-| `cd web && npm run build` | `just web` |
-| `cd web && npm run dev` | `just dev-start` |
-| `cd web && npm run preview` | `just serve` |
-| `cd web && npm run lint` / `lint:fix` | `just lint-web` |
-| `cd web && npm run typecheck` | `just check-web` |
-| `uv sync` | `just setup` |
-| `uv run …` | the matching `just` recipe (raw `uv run` only when no recipe exists) |
-| `git commit …` | `just commit <type> <summary>` |
+| Task | Command |
+| --- | --- |
+| Install Python and web dependencies | `just setup` |
+| Build or resume the dataset | `just dataset` |
+| Re-derive using cached API responses | `just dataset --reset` |
+| Start the development server | `just dev-start` |
+| Check dev-server state or logs | `just dev-status`, `just dev-logs` |
+| Stop the development server | `just dev-stop` |
+| Production web build | `just web` |
+| Build and preview the viewer on port 8787 | `just serve` |
+| Python type and bytecode checks | `just check-python` |
+| Python lint with auto-fix | `just lint-python` |
+| TypeScript and Svelte checks | `just check-web` |
+| Web lint with auto-fix | `just lint-web` |
+| Playwright browser suite | `just test-web [args]` |
 
-Only drop to raw tooling when no `just` recipe exists for the task.
+- `just lint-python` and `just lint-web` intentionally modify files. Inspect their diff before retaining changes.
+- Run `just dev-start` before `just test-web`; the Playwright suite uses the running development server.
+- `just web` runs a clean web dependency install before building. Use it for a production-build check, not for routine iteration.
+- `just dataset` is resumable and cached. Use `--skip-failed` only when intentionally excluding previously terminal failures.
 
-This is also **enforced** in `opencode.json` via permissions: raw
-`cd *web*`, `npm run *`, `pnpm *`, and `yarn *` are denied, and
-`npm ci` / `npm install` / `npx` / `uv` prompt for confirmation. If a command
-is denied, switch to the `just` equivalent rather than working around it.
+## Data Contract
 
-## Python Package (`src/rugby_composition_predictor/`)
+- RIMS/Opta numeric IDs are canonical for teams, players, and coaches.
+- Keep only complete games: two competitors, non-empty rosters, and both scores.
+- Jersey numbers 1-15 are starters; 16-23 are bench players.
+- The dataset pipeline is `cli.py` -> `DatasetBuilder` -> RIMS/ESPN clients and `ApiCache` -> `Dataset.save()`.
+- The viewer treats `dataset.json` as its source of truth. Do not reintroduce a separate graph export without an explicit design change.
+- Preserve cache semantics: `--reset` re-derives from cached responses; deleting `data/api_cache.json` forces API downloads.
 
-**Entry point:** `rugby_composition_predictor` (via `uv run` or `.venv/bin/`)
+## Code Conventions
 
-**Subcommands:**
-- `dataset [--team ID] [--source rims-first|rims|espn] [--reset] [--skip-failed]`
+### Python
 
-**Key modules:**
-- `cli.py` — CLI entry points
-- `builder.py` — DatasetBuilder (orchestrates fetch/parse/merge)
-- `api.py` — EspnApi (ESPN CORE + site.web API)
-- `rims_api.py` — RimsApi (World Rugby RIMS)
-- `cache.py` — ApiCache (JSON file, tracks processed events)
-- `dataset.py` — Dataset model (load/save JSON)
-- `config.py` — Constants: API bases, team IDs, paths, team colors
-- `models.py` — Pydantic models for API responses
-- `storage.py` — LocalStorage helpers for web
+- Match the existing Pydantic models and `Dataset` merge/save boundaries rather than passing untyped API dictionaries across modules.
+- Use Python 3.12 typing and Ruff formatting: 88-character lines, double quotes.
+- Preserve the builder's incremental-save, processed-marker, and negative-cache behavior when changing ingestion.
+- Add fixture-based tests for deterministic parsing, normalization, serialization, or cache behavior when practical. Do not promote the cache-backed diagnostic to a CI gate.
 
-## Web App (`web/`)
+### Web
 
-**Stack:** Svelte 5 + Vite + TypeScript + Tailwind 4 + daisyUI
-**Graph:** sigma.js v3 + graphology + ForceAtlas2 (web worker)
+- Use Svelte 5 runes and the existing component/data-flow patterns.
+- Keep graph construction in `web/src/graph/`; keep shared domain types in `web/src/types.ts`.
+- Preserve temporal graph invariants: immutable dataset input, sorted match stream, reversible deltas, and one persistent layout worker.
+- Use Tailwind utilities for layout and spacing and daisyUI classes/variants for controls. Avoid custom `<style>` blocks.
+- Use `font-mono` for numeric or technical displays. Test UI changes at desktop and narrow mobile widths.
 
-**Commands:**
-- `npm run dev` — Dev server (port 5173)
-- `npm run build` — Production build → `dist/`
-- `npm run preview` — Serve `dist/` on port 8787
-- `npm run typecheck` — `tsc --noEmit && svelte-check`
-- `npm run lint` / `lint:fix` — ESLint
+## Verification
 
-**Key files:**
-- `web/src/lib.ts` — Main graph logic, parsing, filtering
-- `web/src/types.ts` — Shared TypeScript interfaces
-- `web/src/graph/positions.ts` — localStorage position persistence
-- `web/src/components/` — Svelte components (GraphView, Controls, etc.)
+Run the narrowest relevant checks while developing, then run the applicable completion checks.
 
-**CSS conventions:**
-- Use **Tailwind utility classes** for all layout and spacing
-- Use **daisyUI component classes** for UI elements: `btn`, `badge`, `input`, `range`, `checkbox`, `tabs`, `collapse`, `stat`, `table`, `loading`, etc.
-- Prefer `daisyUI` variants over custom CSS: `btn-primary`, `btn-ghost`, `btn-sm`, `badge-xs`, `input-bordered`, `range-sm`, `checkbox-xs`, `tab-active`, `collapse-plus`, etc.
-- Avoid custom `<style>` blocks — use Tailwind + daisyUI only
-- Use `font-mono` for numeric/technical displays
+| Change | Required checks before completion |
+| --- | --- |
+| Python source | `just check-python` |
+| Python lint-affecting change | `just lint-python`, then inspect the diff |
+| Svelte or TypeScript source | `just check-web` |
+| Web lint-affecting change | `just lint-web`, then inspect the diff |
+| Temporal graph, interaction, or browser behavior | `just dev-start`, then `just test-web` |
+| Web production behavior or dependencies | `just web` |
+| User-visible UI behavior | Verify the running viewer at desktop and mobile widths |
 
-## Data Model
+If a required check cannot run, report the exact command and reason. Do not claim success without stating the verification performed.
 
-**`data/dataset.json`:**
-```json
-{
-  "games": [{ "eventId", "date", "venueId", "leagueId", "competitors": [{ "teamId", "home", "score", "coachId", "roster": [{ "playerId", "jersey" }]}]}],
-  "teams": { "id": "name" },
-  "players": { "id": "name" },
-  "venues": { "id": { "name", "city", "country" }},
-  "leagues": { "key": { "name", "abbreviation" }},
-  "coaches": { "id": "name" }
-}
-```
+## Git
 
-- IDs use **RIMS/Opta namespace** (numeric for teams/players/coaches)
-- Only complete games kept (both competitors, non-empty rosters, both scores)
-- Jerseys 1-15 = starters, 16-23 = bench
-
-
-## APIs Used
-
-| API | Base URL | Purpose |
-|-----|----------|---------|
-| ESPN CORE | `https://sports.core.api.espn.com/v2/sports/rugby` | Team events, summaries |
-| ESPN site.web | `https://site.web.api.espn.com/apis/site/v2/sports/rugby` | Lineups/rosters (inline in summary) |
-| World Rugby RIMS | `https://api.wr-rims-prod.pulselive.com/rugby/v3` | Primary datasource (rosters, matches) |
-
-## Development Notes
-
-- Dev server runs on **port 5173** (Vite), preview on **port 8787**
-- Cache at `data/api_cache.json` — raw API responses, keyed by URL
-- `--reset` clears processed markers, re-derives from cache (no re-download)
-- Delete `data/api_cache.json` to force full re-download
-- `INTERNATIONAL_TEAM_IDS` in `config.py` — all national team IDs
-
-## Tools to Use
-
- - **cocoindex-code** / **codegraph** — search/understand codebase
- - **chrome-devtools** — debug web app (port 5173 or 8787)
- - **just** — all project commands
- - **uv** — Python package management
-
-## Agent configuration (opencode)
-
-Agent behaviour for opencode is configured in `opencode.json` at the repo
-root (safe to commit). It:
-
-- ignores caches/build dirs in the file watcher (`node_modules/`, `dist/`,
-  `.venv/`, `.codegraph/`, `.cocoindex_code/`, `data/api_cache.json`,
-  `test-results/`) to cut change-notification noise;
-- prunes old tool output during context compaction to keep long sessions
-  within token limits.
-
-When editing this repo, prefer the `just` commands above and the code-intel
-tools (codegraph for structure, chrome-devtools for the running viewer), and
-run `just check-python` / `just check-web` after changes.
-
-<!-- openwolf:begin -->
-# OpenWolf
-
-This project uses OpenWolf for context management. Read and follow .wolf/OPENWOLF.md at session start. Check .wolf/cerebrum.md before generating code. Grep .wolf/anatomy.md for a file's path before reading it (never read the whole index).
-<!-- openwolf:end -->
+- Use `just commit <type> <summary> [body]` only when a commit is requested.
+- Valid commit types are `feat`, `fix`, `refactor`, `chore`, `docs`, `test`, `perf`, `style`, `build`, and `revert`.

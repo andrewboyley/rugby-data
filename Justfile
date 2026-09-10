@@ -1,9 +1,9 @@
 set shell := ["bash", "-cu"]
 
-project := "rugby-composition-predictor"
 venv := ".venv/bin"
 
-# --- setup -------------------------------------------------------------------
+default:
+    @just --list
 
 # Install dependencies into the project virtualenv
 setup:
@@ -11,64 +11,65 @@ setup:
 
 # Build the rugby dataset from the ESPN API (resumable, cached)
 dataset *args:
-    {{ venv }}/rugby-composition-predictor dataset {{args}}
+    {{ venv }}/rugby-composition-predictor dataset {{ args }}
 
-# Rebuild the dataset (forwards extra args, e.g. --reset)
-build *args:
-    {{ venv }}/rugby-composition-predictor dataset {{args}}
+# Rebuild the dataset (forwards extra args, e.g. --reset).
+alias build := dataset
 
-# --- web ---------------------------------------------------------------------
-
-# Build the Svelte viewer into dist/
+# Build the Svelte viewer into dist/.
+[working-directory("web")]
 web:
-    cd web && npm ci && npm run build
+    npm ci && npm run build
+
+[private]
+dev command *args:
+    cd web && ./scripts/dev-server.sh {{ command }} {{ args }}
 
 # Dev server management via script (start/stop/restart/status/logs/follow)
-dev-start:
-    cd web && ./scripts/dev-server.sh start
+dev-start: (dev "start")
 
-dev-stop:
-    cd web && ./scripts/dev-server.sh stop
+dev-stop: (dev "stop")
 
-dev-restart:
-    cd web && ./scripts/dev-server.sh restart
+dev-restart: (dev "restart")
 
-dev-status:
-    cd web && ./scripts/dev-server.sh status
+dev-status: (dev "status")
 
-dev-logs *lines="100":
-    cd web && ./scripts/dev-server.sh logs {{lines}}
+dev-logs lines="100": (dev "logs" lines)
 
-dev-follow:
-    cd web && ./scripts/dev-server.sh follow
+dev-follow: (dev "follow")
 
-# Serve the built viewer with Vite (localhost:8787); rebuilds first
+# Serve the built viewer with Vite (localhost:8787); rebuilds first.
+[working-directory("web")]
 serve: web
-    cd web && npm run preview
+    npm run preview
 
-# --- checks ------------------------------------------------------------------
-
-# Verify the package compiles
+# Verify the Python package compiles.
 check-python:
     {{ venv }}/ty check src
     {{ venv }}/python -m compileall -q src
 
-# Lint the codebase (requires ruff)
+# Lint the Python package.
 lint-python:
     {{ venv }}/ruff check --fix src
 
+# Type-check the Svelte viewer.
+[working-directory("web")]
 check-web:
-    cd web && npm run typecheck
+    npm run typecheck
 
+# Lint the Svelte viewer.
+[working-directory("web")]
 lint-web:
-    cd web && npm run lint:fix
+    npm run lint:fix
 
 # Run the browser and temporal integration suite.
+[working-directory("web")]
 test-web *args:
-    cd web && npx playwright test {{args}}
-    
+    npx playwright test {{ args }}
 
-# --- git ---------------------------------------------------------------------
+# Run the OpenSpec-driven Ralph builder. Usage: just ralph [iterations]
+ralph iterations="100":
+    ralph --prompt-file .ralph/prompt.md --agent opencode --allow-all --no-commit --no-questions --max-iterations {{ iterations }} --completion-promise COMPLETE --abort-promise BLOCKED
 
 # Show working-tree status
 status:

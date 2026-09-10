@@ -14,30 +14,10 @@
       "test-results/**"
     ]
   },
-  "compaction": {
-    "auto": true,
-    "prune": true,
-    "reserved": 12000
-  },
   "mcp": {
     "chrome-devtools": {
       "type": "local",
       "command": ["npx", "-y", "chrome-devtools-mcp@latest", "--executablePath=/usr/bin/chromium"]
-    }
-  },
-  "permission": {
-    "bash": {
-      "*": "allow",
-      "just *": "allow",
-      "git *": "allow",
-      "cd *web*": "deny",
-      "npm run *": "deny",
-      "pnpm *": "deny",
-      "yarn *": "deny",
-      "npm ci*": "ask",
-      "npm install*": "ask",
-      "npx *": "ask",
-      "uv *": "ask"
     }
   }
 }
