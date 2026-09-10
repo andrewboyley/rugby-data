@@ -29,6 +29,7 @@ data/*
 /.cocoindex/
 .cursor/
 .claude/
+.omo/
 
 # Build / test artifacts
 dist/
