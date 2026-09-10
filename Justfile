@@ -13,14 +13,9 @@ setup:
 dataset *args:
     {{ venv }}/rugby-composition-predictor dataset {{args}}
 
-# Derive the player co-occurrence graph from the dataset
-graph:
-    {{ venv }}/rugby-composition-predictor graph
-
-# Rebuild both dataset and graph (forwards extra args to `dataset`, e.g. --reset)
+# Rebuild the dataset (forwards extra args, e.g. --reset)
 build *args:
     {{ venv }}/rugby-composition-predictor dataset {{args}}
-    {{ venv }}/rugby-composition-predictor graph
 
 # --- web ---------------------------------------------------------------------
 
@@ -67,6 +62,10 @@ check-web:
 
 lint-web:
     cd web && npm run lint:fix
+
+# Run the browser and temporal integration suite.
+test-web *args:
+    cd web && npx playwright test {{args}}
     
 
 # --- git ---------------------------------------------------------------------

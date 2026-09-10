@@ -9,6 +9,7 @@ from typing import Any
 
 def _atomic_write(path: Path, write) -> None:
     """Write to a unique temp file beside `path`, then atomically replace it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:

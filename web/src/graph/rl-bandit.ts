@@ -22,6 +22,7 @@
 // degrades to ordinary (context-free) ridge regression — graceful.
 
 import type { LayoutTickStats } from "./layout";
+import { Mulberry32, type SeededRandom } from "./layout-environment";
 import {
 	FeatureNormalizer,
 	type FA2Params,
@@ -35,6 +36,11 @@ import {
 
 export type Sign = 1 | -1;
 
+export type StrictBestEvent = {
+	readonly params: FA2Params;
+	readonly reward: number;
+};
+
 /** One optimisable FA2 dim: its discrete level set. Booleans get 2 levels. */
 export interface DimDef {
 	key: keyof FA2Params;
@@ -47,7 +53,6 @@ export interface DimDef {
 // more accurate): the graphology implementation's default is 0.5 and its slider
 // caps at 1.0, so cover [0.1, 1.0] densely around the default.
 export const DIM_DEFS: DimDef[] = [
-	{ key: "scalingRatio", label: "Scaling", levels: [2, 5, 10, 20, 40, 60, 80, 100] },
 	{ key: "gravity", label: "Gravity", levels: [0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10] },
 	{ key: "slowDown", label: "SlowDown", levels: [0.1, 1, 5, 10, 25, 50] },
 	{ key: "barnesHutTheta", label: "BH Theta", levels: [0.1, 0.2, 0.4, 0.5, 0.8, 1] },
@@ -56,7 +61,6 @@ export const DIM_DEFS: DimDef[] = [
 	{ key: "barnesHutOptimize", label: "BH Optimize", levels: [false, true] },
 	{ key: "outboundAttractionDistribution", label: "Outbound", levels: [false, true] },
 	{ key: "linLogMode", label: "LinLog", levels: [false, true] },
-	{ key: "adjustSizes", label: "Adjust Sizes", levels: [false, true] },
 ];
 
 /** Index of the level closest to `v` (booleans compare as 0/1). */
@@ -194,11 +198,28 @@ export interface BanditSnapshot {
 export interface DiscreteBanditOpts {
 	weights?: HeuristicWeights;
 	signs?: Record<keyof HeuristicFeatures, Sign>;
+	/** Deterministic source used for epsilon exploration. */
+	random?: SeededRandom;
+	/** Convenience seed when a custom deterministic source is not supplied. */
+	seed?: number;
+	/** Number of observed stats required before reward learning is enabled. */
+	calibrationSteps?: number;
 }
 
 /** Fallback anchor: DIM_DEFS first levels, used before any chooseArm call. */
 function defaultAnchor(): FA2Params {
-	const p = {} as Record<keyof FA2Params, number | boolean>;
+	const p: Record<keyof FA2Params, number | boolean> = {
+		gravity: 0.1,
+		slowDown: 1,
+		scalingRatio: 1,
+		strongGravityMode: true,
+		barnesHutOptimize: true,
+		barnesHutTheta: 0.5,
+		edgeWeightInfluence: 1,
+		outboundAttractionDistribution: true,
+		linLogMode: false,
+		adjustSizes: true,
+	};
 	for (const d of DIM_DEFS) p[d.key] = d.levels[0];
 	return p as FA2Params;
 }
@@ -206,7 +227,9 @@ function defaultAnchor(): FA2Params {
 export class DiscreteBanditOptimizer {
 	private weights: HeuristicWeights = defaultWeights();
 	private signs: Record<keyof HeuristicFeatures, Sign> = { ...FEATURE_SIGN };
-	private readonly normalizer = new FeatureNormalizer(60);
+	private readonly normalizer: FeatureNormalizer;
+	private readonly random: SeededRandom;
+	private readonly calibrationSteps: number;
 	/** Per dim: one LinUCB arm per level. */
 	private arms = new Map<keyof FA2Params, LinUCBArm[]>();
 	private locked: Set<keyof FA2Params> = new Set();
@@ -228,7 +251,13 @@ export class DiscreteBanditOptimizer {
 	/** contextDim used when the current arm models were seeded (retarget). */
 	private lastContextDim = 0;
 
-	constructor(_opts: DiscreteBanditOpts = {}) {}
+	constructor(opts: DiscreteBanditOpts = {}) {
+		this.calibrationSteps = Math.max(0, Math.floor(opts.calibrationSteps ?? 60));
+		this.normalizer = new FeatureNormalizer(this.calibrationSteps);
+		this.random = opts.random ?? new Mulberry32(opts.seed ?? 0);
+		if (opts.weights) this.weights = opts.weights;
+		if (opts.signs) this.signs = opts.signs;
+	}
 
 	setWeights(w: HeuristicWeights): void {
 		this.weights = w;
@@ -238,7 +267,7 @@ export class DiscreteBanditOptimizer {
 	}
 
 	isCalibrated(): boolean {
-		return this.normalizer.calibrated;
+		return this.calibrationSteps === 0 || this.normalizer.calibrated;
 	}
 
 	/** Feed a layout tick into the (display) feature normaliser. */
@@ -286,6 +315,7 @@ export class DiscreteBanditOptimizer {
 		this.leaderboard = [];
 		this.exploreCount = 0;
 		this.totalPicks = 0;
+		this.normalizer.reset(this.calibrationSteps);
 	}
 
 	/** Mid-run objective change (weights/signs/locks edited while running):
@@ -386,8 +416,8 @@ export class DiscreteBanditOptimizer {
 			}
 			// Epsilon-greedy: occasionally pick a random level to ensure exploration
 			let epsilonExplored = false;
-			if (Math.random() < EPSILON) {
-				bestIdx = Math.floor(Math.random() * arms.length);
+			if (this.random.next() < EPSILON) {
+				bestIdx = Math.floor(this.random.next() * arms.length);
 				epsilonExplored = true;
 			}
 			// Count exploration: UCB picked non-empirical, or epsilon forced random
@@ -404,7 +434,9 @@ export class DiscreteBanditOptimizer {
 
 	/** Fold a completed episode's reward into every sampled level's ridge
 	 *  regression, using the same context the arm was chosen under. */
-	recordEpisode(reward: number, context: number[] | null = null): void {
+	recordEpisode(reward: number, context: number[] | null = null): StrictBestEvent | null {
+		// Reward scales are not comparable until calibration has frozen.
+		if (!this.isCalibrated() || !Number.isFinite(reward)) return null;
 		const ctx = this.withBias(context);
 		const improved = isNaN(this.incumbentReward) || reward > this.incumbentReward;
 		for (const dim of DIM_DEFS) {
@@ -415,14 +447,17 @@ export class DiscreteBanditOptimizer {
 		}
 		this.rewardHistory.push(reward);
 		this.leaderboard.push({ params: this.buildParams(this.currentLevels), reward, episode: this.episode });
+		let strictBest: StrictBestEvent | null = null;
 		if (improved) {
 			this.incumbentReward = reward;
 			if (reward > this.bestReward) {
 				this.bestReward = reward;
 				this.bestRewardParams = this.buildParams(this.currentLevels);
+				strictBest = { params: this.bestRewardParams, reward };
 			}
 		}
 		this.episode++;
+		return strictBest;
 	}
 
 	/** Append the bias term; null/short context degrades to zeros + bias. */

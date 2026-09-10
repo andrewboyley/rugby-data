@@ -11,11 +11,9 @@ from .cache import ApiCache
 from .config import (
     DEFAULT_CACHE_PATH,
     DEFAULT_DATASET_PATH,
-    DEFAULT_GRAPH_PATH,
     INTERNATIONAL_TEAM_IDS,
 )
 from .dataset import Dataset
-from .graph import CoOccurrenceGraph
 from .reporting import RichProgressBar
 from .rims_api import RimsApi
 
@@ -68,17 +66,6 @@ def build_dataset(
         builder.build(progress, skip_failed=skip_failed)
 
 
-def build_graph(
-    dataset_path: Path = DEFAULT_DATASET_PATH,
-    graph_path: Path = DEFAULT_GRAPH_PATH,
-) -> None:
-    dataset = Dataset.load(dataset_path)
-    graph = CoOccurrenceGraph(dataset, dataset_path)
-    graph.save(graph_path)
-    print(graph.summarize())
-    print(f"\nwrote {graph_path}")
-
-
 def main(argv=None) -> None:
     try:
         if isinstance(sys.stdout, io.TextIOWrapper):
@@ -88,8 +75,7 @@ def main(argv=None) -> None:
 
     parser = argparse.ArgumentParser(
         prog="rugby-composition-predictor",
-        description="Build a dataset and co-occurrence graph of "
-        "international rugby matches.",
+        description="Build an international rugby match dataset.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -126,18 +112,6 @@ def main(argv=None) -> None:
         "(RIMS has no roster and no usable ESPN fallback)",
     )
 
-    graph_cmd = sub.add_parser("graph", help="build graph.json")
-    graph_cmd.add_argument(
-        "--input",
-        default=DEFAULT_DATASET_PATH,
-        help="dataset input (default: %(default)s)",
-    )
-    graph_cmd.add_argument(
-        "--output",
-        default=DEFAULT_GRAPH_PATH,
-        help="graph output (default: %(default)s)",
-    )
-
     args = parser.parse_args(argv)
 
     if args.command == "dataset":
@@ -150,5 +124,3 @@ def main(argv=None) -> None:
             reset=args.reset,
             skip_failed=args.skip_failed,
         )
-    elif args.command == "graph":
-        build_graph(Path(args.input), Path(args.output))

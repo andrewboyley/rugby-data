@@ -1,0 +1,9 @@
+{
+  "games": [
+    {"eventId": 1, "date": "2020-01-01T12:00:00Z", "competitors": [{"teamId": 1, "score": 20, "coachId": "9", "roster": [{"playerId": 1}, {"playerId": 2}]}, {"teamId": 2, "score": 10, "coachId": "10", "roster": [{"playerId": 3}, {"playerId": 4}]}]},
+    {"eventId": 2, "date": "2020-01-03T12:00:00Z", "competitors": [{"teamId": 1, "score": 8, "coachId": "9", "roster": [{"playerId": 1}, {"playerId": 2}, {"playerId": 3}]}]}
+  ],
+  "players": {"1": "One", "2": "Two", "3": "Three", "4": "Four"},
+  "teams": {"1": "One", "2": "Two"},
+  "coaches": {"9": "Coach Nine", "10": "Coach Ten"}
+}

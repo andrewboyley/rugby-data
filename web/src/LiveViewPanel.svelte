@@ -99,7 +99,7 @@
 		const yVal = Math.max(slice[n - 1].kineticEnergy, 1e-6);
 		const left = plot.valToPos(xVal, "x");
 		const top = plot.valToPos(yVal, "y");
-		plot.setCursor({ left, top, idx: n - 1 });
+		plot.setCursor({ left, top });
 	}
 
 	function snapOnLeave(plot: uPlot) {

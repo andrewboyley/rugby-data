@@ -11,18 +11,17 @@
     params: FA2Params;
     locked: Set<FA2ParamKey>;
     autoTune: boolean;
-    bestParams?: FA2Params;
     onChange: (key: FA2ParamKey, value: number | boolean) => void;
     onLockToggle: (key: FA2ParamKey) => void;
     title: string;
     format?: (v: number) => string;
   }
 
-  let { key, label, min, max, step, type, params, locked, autoTune, bestParams, onChange, onLockToggle, title, format = (v: number) => parseFloat(v.toFixed(3)).toString() }: Props = $props();
+  let { key, label, min, max, step, type, params, locked, autoTune, onChange, onLockToggle, title, format = (v: number) => parseFloat(v.toFixed(3)).toString() }: Props = $props();
 
   const isLocked = $derived(locked.has(key));
   const disabled = $derived(autoTune && !isLocked);
-  const displayValue = $derived(autoTune && bestParams ? bestParams[key] : params[key]);
+  const displayValue = $derived(params[key]);
 
   function handleSliderInput(e: Event) {
     if (!autoTune || isLocked) {
@@ -57,7 +56,7 @@
     {:else}
       <input
         type="checkbox"
-        checked={displayValue}
+        checked={displayValue as boolean}
         class="checkbox checkbox-xs"
         disabled={disabled}
         onchange={handleCheckboxChange}

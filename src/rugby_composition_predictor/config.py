@@ -127,7 +127,6 @@ SECONDARY_KIT_COLOURS: dict[str, str] = {
 }
 
 DEFAULT_DATASET_PATH = DATA_DIR / "dataset.json"
-DEFAULT_GRAPH_PATH = DATA_DIR / "graph.json"
 DEFAULT_CACHE_PATH = DATA_DIR / "api_cache.json"
 
 DEFAULT_MAX_WORKERS = 8

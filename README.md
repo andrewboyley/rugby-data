@@ -1,7 +1,7 @@
 # Rugby Composition Predictor
 
-Builds a dataset of international rugby union matches from the ESPN CORE API,
-derives a player co-occurrence graph, and visualises it in the browser.
+Builds a dataset of international rugby union matches from the ESPN CORE API
+and visualises its temporal co-occurrence graph in the browser.
 
 The dataset covers all international (national) teams. Match discovery
 iterates each team's events per year, so any competition a national team enters
@@ -21,11 +21,10 @@ just setup          # uv sync + install web dependencies
 
 Run `just --list` to see all available commands.
 
-## Build the dataset and graph
+## Build the dataset
 
 ```sh
 just dataset        # fetch all international teams -> data/dataset.json
-just graph          # build data/graph.json from the dataset
 ```
 
 Restrict to a single team with `--team <id>` (e.g. `just dataset --team 5`
@@ -42,7 +41,6 @@ You can also run the Python package directly instead of via `just`:
 
 ```sh
 .venv/bin/rugby-composition-predictor dataset
-.venv/bin/rugby-composition-predictor graph
 ```
 
 ## Run the viewer
@@ -61,8 +59,8 @@ just dev-status      # show status / logs
 just dev-stop        # stop it
 ```
 
-The viewer reads the generated `data/graph.json` (and `data/dataset.json`)
-from the repository root.
+The viewer reads `data/dataset.json` from the repository root and derives the
+reversible temporal graph in the browser.
 
 ## Visualisation
 
@@ -74,6 +72,9 @@ connect players who shared a match (width/opacity = co-occurrence count).
 Rendering and interaction use [sigma.js](https://www.sigmajs.org) on a
 [graphology](https://graphology.github.io) graph, with the
 ForceAtlas2 layout (`graphology-layout-forceatlas2`) running in a web worker
+
+The temporal viewer is the only application path. It loads `dataset.json`
+directly; the retired static `graph.json` renderer has been removed.
 with stock settings. Filter by min shared matches, max degree, team or date
 window; click a node to focus its teammates; use the search box to jump to a
 player, or the Recenter button to zoom the view to the currently filtered
@@ -84,7 +85,7 @@ defaults.
 ## Layout
 
 ```
-data/   dataset.json, graph.json, api_cache.json (generated)
+data/   dataset.json, api_cache.json (generated)
 dist/   built viewer (generated)
 web/    Svelte source for the browser visualisation
 src/    rugby_composition_predictor package

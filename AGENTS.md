@@ -3,7 +3,7 @@
 ## Project Overview
 Builds dataset of international rugby union matches from ESPN CORE API + World Rugby RIMS API, derives player co-occurrence graph, visualises in browser (Svelte + sigma.js).
 
-**Data flow:** ESPN/RIMS APIs → `dataset.json` → `graph.json` → web viewer
+**Data flow:** ESPN/RIMS APIs → `dataset.json` → temporal web viewer
 
 ## Commands (via `just`)
 
@@ -11,8 +11,7 @@ Builds dataset of international rugby union matches from ESPN CORE API + World R
 |---------|-------------|
 | `just setup` | Install deps (uv sync) |
 | `just dataset` | Build `data/dataset.json` (resumable, cached) |
-| `just graph` | Build `data/graph.json` from dataset |
-| `just build` | Run both dataset + graph |
+| `just build` | Build `data/dataset.json` |
 | `just web` | Build Svelte viewer → `dist/` |
 | `just serve` | Build + preview on `localhost:8787` |
 | `just dev-start/stop/restart/status/logs/follow` | Dev server management |
@@ -58,7 +57,6 @@ is denied, switch to the `just` equivalent rather than working around it.
 
 **Subcommands:**
 - `dataset [--team ID] [--source rims-first|rims|espn] [--reset] [--skip-failed]`
-- `graph [--input dataset.json] [--output graph.json]`
 
 **Key modules:**
 - `cli.py` — CLI entry points
@@ -67,7 +65,6 @@ is denied, switch to the `just` equivalent rather than working around it.
 - `rims_api.py` — RimsApi (World Rugby RIMS)
 - `cache.py` — ApiCache (JSON file, tracks processed events)
 - `dataset.py` — Dataset model (load/save JSON)
-- `graph.py` — CoOccurrenceGraph (builds player/coach edges)
 - `config.py` — Constants: API bases, team IDs, paths, team colors
 - `models.py` — Pydantic models for API responses
 - `storage.py` — LocalStorage helpers for web
@@ -115,7 +112,6 @@ is denied, switch to the `just` equivalent rather than working around it.
 - Only complete games kept (both competitors, non-empty rosters, both scores)
 - Jerseys 1-15 = starters, 16-23 = bench
 
-**`data/graph.json`:** Co-occurrence graph (nodes=players/coaches, edges=shared matches, weight=count)
 
 ## APIs Used
 

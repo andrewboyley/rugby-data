@@ -1,7 +1,7 @@
 import { mount } from "svelte";
 import "./app.css";
 import "katex/dist/katex.min.css";
-import App from "./App.svelte";
+import App from "./TemporalApp.svelte";
 import TestLab from "./GraphologyTestPage.svelte";
 
 const target = document.getElementById("app");

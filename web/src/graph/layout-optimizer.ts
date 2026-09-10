@@ -23,6 +23,8 @@ export interface FA2Params {
 	adjustSizes: boolean;
 }
 
+export type FA2ParamKey = keyof FA2Params;
+
 export interface HeuristicWeights {
 	angle: number;
 	minAngle: number;

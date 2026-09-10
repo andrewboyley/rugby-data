@@ -14,6 +14,7 @@ export interface OptimizerState {
   trainerStats: TrainerStats;
   episodeMeans: number[];
   episodeItersPerSec: number[];
+  calibrationSteps: number;
 }
 
 export interface TrainerStats {
@@ -36,7 +37,7 @@ const initialTrainerStats: TrainerStats = {
 
 const initialState: OptimizerState = {
   autoTune: false,
-  episodeLength: 3,
+  episodeLength: 120,
   weights: defaultWeights(),
   signs: { ...FEATURE_SIGN },
   ignoreWeights: {
@@ -54,13 +55,14 @@ const initialState: OptimizerState = {
   trainerStats: initialTrainerStats,
   episodeMeans: [],
   episodeItersPerSec: [],
+  calibrationSteps: 0,
 };
 
 export const optimizerState = $state<OptimizerState>({ ...initialState });
 
 export function resetOptimizerState() {
   optimizerState.autoTune = false;
-  optimizerState.episodeLength = 3;
+  optimizerState.episodeLength = 120;
   optimizerState.weights = defaultWeights();
   optimizerState.signs = { ...FEATURE_SIGN };
   optimizerState.ignoreWeights = {
@@ -78,10 +80,12 @@ export function resetOptimizerState() {
   optimizerState.trainerStats = initialTrainerStats;
   optimizerState.episodeMeans = [];
   optimizerState.episodeItersPerSec = [];
+  optimizerState.calibrationSteps = 0;
 }
 
 export function setAutoTune(value: boolean) {
   optimizerState.autoTune = value;
+  optimizerState.calibrationSteps = 0;
   if (!value) {
     optimizerState.currentEpisodeParams = null;
     optimizerState.optimState = null;
@@ -89,6 +93,10 @@ export function setAutoTune(value: boolean) {
     optimizerState.episodeMeans = [];
     optimizerState.episodeItersPerSec = [];
   }
+}
+
+export function recordCalibrationStep(): void {
+  if (optimizerState.autoTune) optimizerState.calibrationSteps = Math.min(60, optimizerState.calibrationSteps + 1);
 }
 
 export function setEpisodeLength(value: number) {

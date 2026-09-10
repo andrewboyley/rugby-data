@@ -275,7 +275,7 @@
 	</div>
 
 	{#if showTimeline}
-		<div class="timeline-content">
+		<div class="timeline-content" data-testid="timeline-panel">
 			<!-- Year histogram -->
 			<div class="histogram">
 				{#if yearBuckets.years.length}

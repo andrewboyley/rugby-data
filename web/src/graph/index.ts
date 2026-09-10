@@ -2,6 +2,8 @@ export * from "./layout";
 export * from "./layout-optimizer";
 export * from "./layout-controller";
 export * from "./layout-trainer";
+export * from "./training-session";
+export * from "./layout-environment";
 export * from "./layout-utils";
 export * from "./rl-bandit";
 export * from "./optimizer-adapter";

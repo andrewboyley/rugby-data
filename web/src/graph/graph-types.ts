@@ -1,11 +1,12 @@
 import type { FA2Params, HeuristicWeights, HeuristicFeatures, LayoutTickStats } from "./layout-optimizer";
-import type { BanditSnapshot, Sign } from "./rl-bandit";
+import type { BanditSnapshot, Sign, StrictBestEvent } from "./rl-bandit";
 
 export type OptimizerFacade = {
   start(initial: FA2Params, locked: Set<keyof FA2Params>): void;
+  reset(initial: FA2Params, locked: Set<keyof FA2Params>): void;
   stop(): void;
   chooseArm(context: number[] | null, currentSettings: FA2Params): FA2Params;
-  recordEpisode(reward: number, context: number[] | null): void;
+	recordEpisode(reward: number, context: number[] | null): StrictBestEvent | null;
   observe(stat: LayoutTickStats): void;
   reward(stat: LayoutTickStats): number;
   featureView(stat: LayoutTickStats): HeuristicFeatures;

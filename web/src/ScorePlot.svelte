@@ -28,7 +28,7 @@
 		const left = plot.valToPos(n - 1, "x");
 		const yv = series[0]?.data[n - 1] ?? 0;
 		const top = plot.valToPos(yv, "y");
-		plot.setCursor({ left, top, idx: n - 1 });
+		plot.setCursor({ left, top });
 	}
 
 	function snapOnLeave(plot: uPlot) {

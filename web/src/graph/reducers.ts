@@ -3,6 +3,7 @@
 import type Graph from "graphology";
 import type { Attributes } from "graphology-types";
 import type { NodeDisplayData, EdgeDisplayData } from "sigma/types";
+import type { TemporalIndex } from "../temporal/TemporalIndex";
 import {
   ACTIVE_BORDER_COLOR,
   SHARED_MATCH_COLOR,
@@ -248,5 +249,71 @@ export function createEdgeReducer(state: StateGetters) {
       (b === focus && state.focusNeighbors().has(a));
     if (!adjacent) res.visibility = "hidden";
     return res as Partial<EdgeDisplayData>;
+  };
+}
+
+export type TemporalReducerState = {
+  graph: () => Graph | null;
+  temporalIndex: () => TemporalIndex | null;
+  time: () => number;
+  teamId: () => number | null;
+  minMatchCount: () => number;
+  edgeColorMode: () => "shared" | "winRate" | "recency";
+  selectedId: () => string | null;
+  partnerId: () => string | null;
+  matchPlayerIds: () => Set<string> | null;
+};
+
+/** Shared temporal equivalents of the legacy match and partner overlays. */
+export function createTemporalNodeReducer(state: TemporalReducerState) {
+  return (node: string, data: NodeDisplayData, attrs: Attributes): Partial<NodeDisplayData> => {
+    const temporalIndex = state.temporalIndex();
+    const active = temporalIndex?.state.nodeActive[Number(attrs.temporalIndex)] === 1;
+    const selected = state.selectedId();
+    const partner = state.partnerId();
+    const graph = state.graph();
+    const matchPlayers = state.matchPlayerIds();
+    const teamId = state.teamId();
+    const teamMatches = teamId == null || (attrs.teams as number[] | undefined)?.includes(teamId);
+    const matchMatches = !matchPlayers?.size || matchPlayers.has(node);
+    const selectedNeighbors = selected != null && graph?.hasNode(selected) ? new Set(graph.neighbors(selected)) : null;
+    const selectionMatches = selectedNeighbors == null || node === selected || selectedNeighbors.has(node);
+    const partnerMatches = partner == null || node === selected || node === partner;
+    const visible = active && teamMatches && matchMatches && selectionMatches && partnerMatches;
+    const result = { ...data, label: visible ? String(attrs.label) : "", color: visible ? data.color : "#cbd5e1", size: selected === node ? 2 : 1.5 } as Record<string, unknown>;
+    result.forceLabel = visible && selectedNeighbors != null;
+    result.visibility = visible ? "visible" : "hidden";
+    return result as Partial<NodeDisplayData>;
+  };
+}
+
+export function createTemporalEdgeReducer(state: TemporalReducerState) {
+  return (edge: string, data: EdgeDisplayData, attrs: Attributes): Partial<EdgeDisplayData> => {
+    const graph = state.graph();
+    const temporalIndex = state.temporalIndex();
+    if (!graph || !temporalIndex) return { ...data, visibility: "hidden" };
+    const [source, target] = graph.extremities(edge);
+    const temporalEdgeIndex = Number(attrs.temporalIndex);
+    const active = temporalIndex.state.edgeActive[temporalEdgeIndex] === 1;
+    const count = temporalIndex.state.edgeCounts[temporalEdgeIndex];
+    const latest = temporalIndex.state.edgeLatest[temporalEdgeIndex];
+    const winRate = temporalIndex.state.edgeWinRateKnown[temporalEdgeIndex] === 1
+      ? temporalIndex.state.edgeWinRate[temporalEdgeIndex]
+      : null;
+    const teamId = state.teamId();
+    const sourceTeams = graph.getNodeAttribute(source, "teams") as number[] | undefined;
+    const targetTeams = graph.getNodeAttribute(target, "teams") as number[] | undefined;
+    const teamMatches = teamId == null || sourceTeams?.includes(teamId) || targetTeams?.includes(teamId);
+    const selected = state.selectedId();
+    const partner = state.partnerId();
+    const selectionMatches = selected == null || source === selected || target === selected;
+    const partnerMatches = partner == null || (selected != null && ((source === selected && target === partner) || (target === selected && source === partner)));
+    const matchPlayers = state.matchPlayerIds();
+    const matchMatches = !matchPlayers?.size || (matchPlayers.has(source) && matchPlayers.has(target));
+    const visible = active && teamMatches && selectionMatches && partnerMatches && matchMatches && count >= state.minMatchCount();
+    const age = state.time() === Number.NEGATIVE_INFINITY ? 0 : Math.max(0, Math.min(1, 1 - (state.time() - latest) / (365 * 86_400_000)));
+    const mode = state.edgeColorMode();
+    const color = mode === "winRate" && winRate != null ? `hsl(${Math.round(winRate * 120)} 70% 42%)` : mode === "recency" ? `hsl(${Math.round(age * 220)} 70% 45%)` : "#64748b";
+    return { ...data, size: 0.5 + Math.log2(count + 1), color, visibility: visible ? "visible" : "hidden" };
   };
 }

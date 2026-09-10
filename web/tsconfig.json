@@ -12,6 +12,7 @@
     "checkJs": false,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "noEmit": true,
     "verbatimModuleSyntax": true,
     "sourceMap": true,
     "esModuleInterop": true,

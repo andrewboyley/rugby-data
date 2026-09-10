@@ -39,6 +39,14 @@ export function startLayout() {
   layoutState.lastFrameTs = performance.now();
 }
 
+export function clearLayoutMetrics() {
+  layoutState.iterations = 0;
+  layoutState.tickStats = [];
+  layoutState.lastStat = null;
+  layoutState.previousPositions = new Map();
+  layoutState.heuristicFeat = null;
+}
+
 export function stopLayout() {
   layoutState.running = false;
 }

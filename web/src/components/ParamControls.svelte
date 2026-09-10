@@ -6,13 +6,12 @@
     params: FA2Params;
     locked: Set<FA2ParamKey>;
     autoTune: boolean;
-    bestParams?: FA2Params;
     onChange: (key: FA2ParamKey, value: number | boolean) => void;
     onLockToggle: (key: FA2ParamKey) => void;
     onReset: () => void;
   }
 
-  let { params, locked, autoTune, bestParams, onChange, onLockToggle, onReset }: Props = $props();
+  let { params, locked, autoTune, onChange, onLockToggle, onReset }: Props = $props();
 
   const paramDefs = [
     // Numeric params (sliders)
@@ -41,7 +40,6 @@
         params={params}
         locked={locked}
         autoTune={autoTune}
-        bestParams={bestParams}
         onChange={onChange}
         onLockToggle={onLockToggle}
         format={fmt}

@@ -1,7 +1,7 @@
 import { DiscreteBanditOptimizer } from "./rl-bandit";
 import type { FA2Params, HeuristicWeights, HeuristicFeatures } from "./layout-optimizer";
 import type { LayoutTickStats } from "./layout";
-import type { BanditSnapshot, Sign } from "./rl-bandit";
+import type { BanditSnapshot, Sign, StrictBestEvent } from "./rl-bandit";
 import type { OptimizerFacade } from "./optimizer-facade";
 
 export class FA2OptimizerAdapter implements OptimizerFacade {
@@ -15,6 +15,10 @@ export class FA2OptimizerAdapter implements OptimizerFacade {
     this.bandit.start(initial, locked, 4);
   }
 
+  reset(initial: FA2Params, locked: Set<keyof FA2Params>): void {
+    this.bandit.start(initial, locked, 4);
+  }
+
   stop(): void {
     this.bandit.stop();
   }
@@ -23,9 +27,9 @@ export class FA2OptimizerAdapter implements OptimizerFacade {
     return this.bandit.chooseArm(context, currentSettings);
   }
 
-  recordEpisode(reward: number, context: number[] | null): void {
-    this.bandit.recordEpisode(reward, context);
-  }
+	recordEpisode(reward: number, context: number[] | null): StrictBestEvent | null {
+		return this.bandit.recordEpisode(reward, context);
+	}
 
   observe(stat: LayoutTickStats): void {
     this.bandit.observe(stat);

@@ -35,7 +35,7 @@ test('test page at /test loads without Sigma errors', async ({ page }) => {
   expect(sigmaErrors.length).toBe(0);
   
   // Check for test page content: sidebar tabs, graph canvas, back button
-  await expect(page.locator('button[role=tab]:has-text("ForceAtlas2")')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'ForceAtlas2' })).toBeVisible();
   await expect(page.locator('canvas').first()).toBeVisible();
   await expect(page.locator('button[title="Back to main"]')).toBeVisible();
 });

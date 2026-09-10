@@ -1,0 +1,24 @@
+{
+  "type": "player-co-occurrence",
+  "source": "web/tests/fixtures/temporal-dataset.json",
+  "dateMin": "2020-01-01",
+  "dateMax": "2020-01-03",
+  "numPlayers": 4,
+  "numEdges": 4,
+  "players": {"1": "One", "2": "Two", "3": "Three", "4": "Four"},
+  "edges": [
+    {"playerA": "1", "playerB": "2", "weight": 2, "dates": ["2020-01-01", "2020-01-03"], "recency": 1},
+    {"playerA": "1", "playerB": "3", "weight": 1, "dates": ["2020-01-03"], "recency": 1},
+    {"playerA": "2", "playerB": "3", "weight": 1, "dates": ["2020-01-03"], "recency": 1},
+    {"playerA": "3", "playerB": "4", "weight": 1, "dates": ["2020-01-01"], "recency": 0}
+  ],
+  "coachAppearances": {"c_9": 2, "c_10": 1},
+  "coaches": {"9": "Coach Nine", "10": "Coach Ten"},
+  "coachEdges": [
+    {"coachA": "1", "coachB": "c_9", "weight": 2, "dates": ["2020-01-01", "2020-01-03"]},
+    {"coachA": "2", "coachB": "c_9", "weight": 2, "dates": ["2020-01-01", "2020-01-03"]},
+    {"coachA": "3", "coachB": "c_9", "weight": 1, "dates": ["2020-01-03"]},
+    {"coachA": "3", "coachB": "c_10", "weight": 1, "dates": ["2020-01-01"]},
+    {"coachA": "4", "coachB": "c_10", "weight": 1, "dates": ["2020-01-01"]}
+  ]
+}
