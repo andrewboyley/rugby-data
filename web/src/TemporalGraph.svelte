@@ -4,6 +4,7 @@
   import { createGridOverlay, type GridOverlay } from "./graph/grid";
   import { fitAll } from "./graph/camera";
   import { TimelineController } from "./TimelineController";
+  import { selectRendererAdapter } from "./graph/renderer";
   import { createTemporalEdgeReducer, createTemporalNodeReducer } from "./graph/reducers";
   import type { DatasetLike } from "./temporal/types";
 
@@ -75,7 +76,8 @@
     constructed = nextController;
     controller = nextController;
     updateTopologyStats(nextController);
-    sigma = untrack(() => new Sigma(nextController.graph, graphHost, {
+    const renderer = selectRendererAdapter({ advancedAdapterVerified: false }, null);
+    sigma = untrack(() => renderer.create(nextController.graph, graphHost, {
       nodeReducer: createTemporalNodeReducer({ graph: () => nextController.graph, temporalIndex: () => nextController.temporalIndex, time: () => time, teamId: () => filters.teamId, minMatchCount: () => filters.minMatchCount, edgeColorMode: () => filters.edgeColorMode, selectedId: () => filters.selectedId, partnerId: () => filters.partnerId, matchPlayerIds: () => filters.matchPlayerIds }),
       edgeReducer: createTemporalEdgeReducer({ graph: () => nextController.graph, temporalIndex: () => nextController.temporalIndex, time: () => time, teamId: () => filters.teamId, minMatchCount: () => filters.minMatchCount, edgeColorMode: () => filters.edgeColorMode, selectedId: () => filters.selectedId, partnerId: () => filters.partnerId, matchPlayerIds: () => filters.matchPlayerIds }),
     }));

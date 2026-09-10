@@ -54,5 +54,11 @@ export interface RugbyTestBench {
 declare global {
   interface Window {
     __rugbyTestBench?: RugbyTestBench;
+    __sigmaV4Compatibility?: {
+      selected(): string | null;
+      state(node: string): { selected?: boolean };
+      nodeViewport(node: string): { x: number; y: number };
+      dispose(): void;
+    };
   }
 }
