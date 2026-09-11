@@ -34,14 +34,25 @@ test('test page renders generated nodes and responds to camera input', async ({ 
   await page.goto('http://localhost:5173/test');
   await page.getByRole('button', { name: 'Graph' }).click();
   await expect(page.getByTestId('graph-count')).toContainText(/Generated graph: [1-9]\d* nodes/);
-  await page.getByRole('checkbox', { name: 'Grid' }).uncheck();
 
-  const graph = page.locator('main');
+  const graph = page.getByTestId('test-graph');
   const bounds = await graph.boundingBox();
   expect(bounds).not.toBeNull();
+  const before = JSON.parse((await graph.getAttribute('data-camera-state')) ?? '{}');
   await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
   await page.mouse.wheel(0, -500);
-  await page.waitForTimeout(100);
+  await expect.poll(async () => JSON.parse((await graph.getAttribute('data-camera-state')) ?? '{}')).not.toEqual(before);
+  const afterWheel = JSON.parse((await graph.getAttribute('data-camera-state')) ?? '{}');
+
+  await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(bounds!.x + bounds!.width / 2 + 80, bounds!.y + bounds!.height / 2 + 40);
+  await page.mouse.up();
+  await expect.poll(async () => JSON.parse((await graph.getAttribute('data-camera-state')) ?? '{}')).not.toEqual(afterWheel);
+  const afterDrag = JSON.parse((await graph.getAttribute('data-camera-state')) ?? '{}');
+  expect(afterDrag.x).toBeLessThan(afterWheel.x);
+  expect(afterDrag.y).toBeGreaterThan(afterWheel.y);
+  await expect(page.getByRole('checkbox', { name: 'Auto-fit' })).not.toBeChecked();
 
   await expect(graph).toBeVisible();
   await expect(page.locator('canvas')).toHaveCount(3);

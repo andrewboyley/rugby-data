@@ -2,6 +2,7 @@
   import { onDestroy, untrack } from "svelte";
   import Sigma from "sigma";
   import { createGridOverlay, type GridOverlay } from "./graph/grid";
+  import { createCameraControls } from "./graph/camera-controls";
   import { fitAll } from "./graph/camera";
   import { TimelineController } from "./TimelineController";
   import { RenderScheduler } from "./graph/RenderScheduler";
@@ -11,7 +12,7 @@
   import type { DatasetLike } from "./temporal/types";
 
   type TemporalFilters = { teamId: number | null; minMatchCount: number; edgeColorMode: "shared" | "winRate" | "recency"; selectedId: string | null; partnerId: string | null; matchPlayerIds: Set<string> | null };
-  let { dataset, time, grid = false, autoFit = true, trails = false, fitRequest = 0, initialPosition = "min", filters, onAutoFitChange = () => {}, onReady = () => {}, onTime = () => {}, onPlayingChange = () => {}, onSelect = () => {} }: { dataset: DatasetLike; time: number; grid?: boolean; autoFit?: boolean; trails?: boolean; fitRequest?: number; initialPosition?: "min" | "max"; filters: TemporalFilters; onAutoFitChange?: (enabled: boolean) => void; onReady?: (controller: TimelineController) => void; onTime?: (time: number) => void; onPlayingChange?: (playing: boolean) => void; onSelect?: (node: string | null) => void } = $props();
+  let { dataset, time, grid = false, autoFit = true, trails = false, fitRequest = 0, homeRequest = 0, initialPosition = "min", filters, onAutoFitChange = () => {}, onReady = () => {}, onTime = () => {}, onPlayingChange = () => {}, onSelect = () => {} }: { dataset: DatasetLike; time: number; grid?: boolean; autoFit?: boolean; trails?: boolean; fitRequest?: number; homeRequest?: number; initialPosition?: "min" | "max"; filters: TemporalFilters; onAutoFitChange?: (enabled: boolean) => void; onReady?: (controller: TimelineController) => void; onTime?: (time: number) => void; onPlayingChange?: (playing: boolean) => void; onSelect?: (node: string | null) => void } = $props();
   let host = $state<HTMLElement | null>(null);
   let controller = $state<TimelineController | null>(null);
   let layoutIdentity = $state(0);
@@ -27,6 +28,7 @@
   let gridFrame: number | null = null;
   let trailFrame: number | null = null;
   let trailCanvas: HTMLCanvasElement | null = null;
+  let previousHomeRequest: number | null = null;
   const trailsByNode = new Map<string, Array<{ x: number; y: number }>>();
 
   function updateTopologyStats(source: TimelineController | null): void {
@@ -39,6 +41,13 @@
   }
 
   function fitGraph(): void { fitAll(sigma, controller?.graph ?? null, { animate: false }); }
+  function resetHome(animate = false): void {
+    if (!sigma) return;
+    const camera = sigma.getCamera();
+    const home = { x: 0.5, y: 0.5, ratio: 1 };
+    if (animate) camera.animate(home, { duration: 300, easing: "quadraticOut" });
+    else camera.setState(home);
+  }
   function drawTrails(): void {
     const canvas = trailCanvas;
     if (!canvas || !host || !sigma || !controller) return;
@@ -92,16 +101,30 @@
       }));
     }
     gridOverlay = createGridOverlay(graphHost, { getSigma: () => sigma, getShow: () => grid });
-    const onCameraInput = () => {
+    const resizeObserver = new ResizeObserver(() => {
+      sigma?.refresh({ schedule: true });
+      gridOverlay?.draw();
+    });
+    resizeObserver.observe(graphHost);
+    const onCameraUpdated = () => {
+      gridOverlay?.draw();
       if (cameraFrame !== null) cancelAnimationFrame(cameraFrame);
       cameraFrame = requestAnimationFrame(() => {
         cameraFrame = null;
         graphHost.dataset.cameraState = JSON.stringify(sigma?.getCamera().getState() ?? {});
       });
+    };
+    sigma.getCamera().addListener("updated", onCameraUpdated);
+    const initialResizeFrame = requestAnimationFrame(() => {
+      sigma?.resize(true);
+      sigma?.refresh();
+      resetHome();
+      gridOverlay?.draw();
+    });
+    const onCameraInput = () => {
       if (autoFit) onAutoFitChange(false);
     };
-    graphHost.addEventListener("wheel", onCameraInput, { capture: true, passive: true });
-    graphHost.addEventListener("mousedown", onCameraInput, true);
+    const cameraControls = createCameraControls(sigma, onCameraInput);
     renderScheduler = new RenderScheduler({
       renderer: sceneHandle?.renderer ?? { render: sigma!.refresh.bind(sigma!) },
       process: ({ seekTime }) => {
@@ -113,7 +136,7 @@
     graphHost.dataset.cameraState = JSON.stringify(sigma.getCamera().getState());
     sigma.on("clickNode", ({ node }) => notifySelection(node));
     notifyReady(nextController);
-    return () => { if (cameraFrame !== null) cancelAnimationFrame(cameraFrame); if (gridFrame !== null) cancelAnimationFrame(gridFrame); if (trailFrame !== null) cancelAnimationFrame(trailFrame); graphHost.removeEventListener("wheel", onCameraInput, true); graphHost.removeEventListener("mousedown", onCameraInput, true); gridOverlay?.destroy(); gridOverlay = null; renderScheduler?.dispose(); renderScheduler = null; sceneHandle?.dispose(); sigma?.kill(); nextController.dispose(); sigma = null; controller = null; };
+    return () => { if (cameraFrame !== null) cancelAnimationFrame(cameraFrame); if (gridFrame !== null) cancelAnimationFrame(gridFrame); if (trailFrame !== null) cancelAnimationFrame(trailFrame); cancelAnimationFrame(initialResizeFrame); resizeObserver.disconnect(); cameraControls.destroy(); sigma?.getCamera().removeListener("updated", onCameraUpdated); gridOverlay?.destroy(); gridOverlay = null; renderScheduler?.dispose(); renderScheduler = null; sceneHandle?.dispose(); sigma?.kill(); nextController.dispose(); sigma = null; controller = null; };
   });
 
   $effect(() => { if (controller && time !== controller.currentTime) { controller.requestSeek(time); updateTopologyStats(controller); } });
@@ -121,6 +144,12 @@
   $effect(() => { filters.teamId; filters.minMatchCount; filters.edgeColorMode; filters.selectedId; filters.partnerId; filters.matchPlayerIds; time; renderScheduler?.invalidate("scene", "overlays"); });
   $effect(() => { grid; if (gridFrame !== null) cancelAnimationFrame(gridFrame); gridFrame = requestAnimationFrame(() => { gridFrame = null; gridOverlay?.draw(); }); });
   $effect(() => { autoFit; fitRequest; if (autoFit) fitGraph(); });
+  $effect(() => {
+    const animate = previousHomeRequest !== null && homeRequest !== previousHomeRequest;
+    previousHomeRequest = homeRequest;
+    resetHome(animate);
+    if (sigma && host) host.dataset.cameraState = JSON.stringify(sigma.getCamera().getState());
+  });
   $effect(() => { trails; if (trailFrame !== null) cancelAnimationFrame(trailFrame); trailFrame = requestAnimationFrame(drawTrails); });
   onDestroy(() => { sigma?.kill(); controller?.dispose(); });
 </script>

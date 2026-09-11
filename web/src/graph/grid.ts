@@ -25,6 +25,15 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
   canvas.style.pointerEvents = "none";
   host.insertBefore(canvas, host.firstChild);
 
+  // Sigma establishes its final viewport transform during rendering. Redraw after
+  // that pass so the first grid uses the same coordinates as subsequent pans.
+  const sigma = opts.getSigma();
+  const onAfterRender = () => draw();
+  sigma?.on("afterRender", onAfterRender);
+  // The Home camera is fixed at the centre of Sigma's framed space. Keeping the
+  // grid origin fixed there prevents camera updates from rebasing its labels.
+  const origin = { x: 0.5, y: 0.5 };
+
   function draw(): void {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
@@ -51,26 +60,72 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
     const stroke = gridStrokeColor(host);
     const label = gridStrokeColor(host, 0.6);
 
-    // Visible world bounds so the grid fills the viewport even when panned
-    // away from the graph.
-    const tl = sigma.viewportToGraph({ x: 0, y: 0 });
-    const br = sigma.viewportToGraph({ x: cssW, y: cssH });
-    const visMinX = Math.min(tl.x, br.x);
-    const visMaxX = Math.max(tl.x, br.x);
-    const visMinY = Math.min(tl.y, br.y);
-    const visMaxY = Math.max(tl.y, br.y);
+    // Use Sigma's framed camera coordinates rather than the graph's raw bounds.
+    // An empty graph has no meaningful raw bounds, while the framed space has a
+    // stable origin at the Home camera position.
+    // Sigma refreshes its cached matrix on the next render frame. The overlay is
+    // also drawn from camera events, so explicitly use the new camera state.
+    const cameraState = sigma.getCamera().getState();
+    const viewportToFramed = (point: { x: number; y: number }) => (
+      sigma.viewportToFramedGraph(point, { cameraState })
+    );
+    const framedToViewport = (point: { x: number; y: number }) => (
+      sigma.framedGraphToViewport(point, { cameraState })
+    );
+    const tl = viewportToFramed({ x: 0, y: 0 });
+    const br = viewportToFramed({ x: cssW, y: cssH });
+    const originScreen = framedToViewport(origin);
+    const frameDelta = 0.01;
+    const xPixelsPerFrame = Math.abs(
+      framedToViewport({ x: origin.x + frameDelta, y: origin.y }).x - originScreen.x,
+    ) / frameDelta;
+    const yPixelsPerFrame = Math.abs(
+      framedToViewport({ x: origin.x, y: origin.y + frameDelta }).y - originScreen.y,
+    ) / frameDelta;
+    const yReferenceScale = yPixelsPerFrame / xPixelsPerFrame;
+    // At Home, the shortest viewport edge spans -100 to 100 reference units.
+    // Calculate that scale from the fixed Home camera, not the current zoom.
+    const homeCameraState = { x: 0.5, y: 0.5, ratio: 1, angle: 0 };
+    const homeOriginScreen = sigma.framedGraphToViewport(origin, { cameraState: homeCameraState });
+    const homeXPixelsPerFrame = Math.abs(
+      sigma.framedGraphToViewport(
+        { x: origin.x + frameDelta, y: origin.y },
+        { cameraState: homeCameraState },
+      ).x - homeOriginScreen.x,
+    ) / frameDelta;
+    const referenceUnits = 200 * homeXPixelsPerFrame / Math.min(cssW, cssH);
+    const toReference = (value: number, axis: "x" | "y") => (
+      value - origin[axis]
+    ) * referenceUnits * (axis === "x" ? 1 : yReferenceScale);
+    const toFramed = (value: number, axis: "x" | "y") => (
+      value / (referenceUnits * (axis === "x" ? 1 : yReferenceScale)) + origin[axis]
+    );
+    const visMinX = Math.min(toReference(tl.x, "x"), toReference(br.x, "x"));
+    const visMaxX = Math.max(toReference(tl.x, "x"), toReference(br.x, "x"));
+    const visMinY = Math.min(toReference(tl.y, "y"), toReference(br.y, "y"));
+    const visMaxY = Math.max(toReference(tl.y, "y"), toReference(br.y, "y"));
 
-    // Grid step adapts to zoom: keep ~14 cells across the visible viewport, so
-    // zooming out yields fewer, larger cells (and zooming in finer ones). A
-    // single step is used for both axes (derived from the larger span) so the
-    // cells are always square; sigma scales x and y uniformly, so one
-    // world-space step maps to the same pixel distance on both axes.
+    // Grid step adapts to zoom: keep ~14 cells across the visible viewport. The
+    // Y reference scale compensates for Sigma's non-square framed viewport.
     const step = niceStep(Math.max(visMaxX - visMinX, visMaxY - visMinY) / 14);
 
-    const toX = (wx: number) => sigma.graphToViewport({ x: wx, y: 0 }).x;
-    const toY = (wy: number) => sigma.graphToViewport({ x: 0, y: wy }).y;
+    const toX = (wx: number) => framedToViewport({ x: toFramed(wx, "x"), y: origin.y }).x;
+    const toY = (wy: number) => framedToViewport({ x: origin.x, y: toFramed(wy, "y") }).y;
+    // A graph can extend below a clipped page viewport. Keep x labels on the
+    // visible bottom edge rather than drawing them outside the viewport.
+    const visibleLabelY = Math.max(
+      12,
+      Math.min(cssH - 4, window.innerHeight - host.getBoundingClientRect().top - 4),
+    );
 
     const screenStep = Math.abs(toX(step) - toX(0));
+    const screenCellHeight = Math.abs(toY(step) - toY(0));
+    canvas.dataset.gridOrigin = JSON.stringify(originScreen);
+    canvas.dataset.gridCellSize = JSON.stringify({ width: screenStep, height: screenCellHeight });
+    canvas.dataset.gridExtent = JSON.stringify({
+      width: visMaxX - visMinX,
+      height: visMaxY - visMinY,
+    });
 
     ctx.strokeStyle = stroke;
     ctx.lineWidth = 1;
@@ -82,7 +137,7 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
       ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, cssH); ctx.stroke();
       if (screenStep >= 36) {
         ctx.fillStyle = label;
-        ctx.fillText(formatCoord(wx), sx + 3, cssH - 4);
+        ctx.fillText(formatCoord(wx), sx + 3, visibleLabelY);
       }
     }
     for (let wy = Math.floor(visMinY / step) * step; wy <= visMaxY; wy += step) {
@@ -99,6 +154,7 @@ export function createGridOverlay(host: HTMLElement, opts: GridOverlayOpts): Gri
   return {
     draw,
     destroy() {
+      sigma?.off("afterRender", onAfterRender);
       if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
     },
   };

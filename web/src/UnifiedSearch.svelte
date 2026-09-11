@@ -173,6 +173,12 @@
 				bind:value={q}
 				onfocus={() => (open = true)}
 				oninput={() => (open = true)}
+				onkeydown={(event) => {
+					if (event.key === "Escape") {
+						open = false;
+						(event.currentTarget as HTMLInputElement).blur();
+					}
+				}}
 				class="w-full rounded-md border border-base-300 bg-base-100 py-2 pl-9 pr-3 text-base-content placeholder:text-base-content/40 shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/30"
 			/>
 		</div>
@@ -188,6 +194,7 @@
 	</div>
 	{#if open}
 		<div
+			data-testid="unified-search-results"
 			class="absolute left-0 right-0 z-[60] mt-2 max-h-[360px] w-full overflow-y-auto rounded-md border border-base-300 bg-base-100 shadow-xl"
 		>
 			{#if !searching}

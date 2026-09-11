@@ -47,6 +47,11 @@ export function createSigmaV4SceneRenderer(
   const sigma = new Sigma(graph, container, {
     primitives: PRIMITIVES,
     styles: STYLES,
+    settings: {
+      allowInvalidContainer: true,
+      itemSizesReference: "positions",
+      autoRescale: false,
+    },
     renderLabels: true,
     renderEdgeLabels: false,
     hideEdgesOnMove: options?.hideEdgesOnMove ?? true,

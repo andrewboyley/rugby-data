@@ -9,7 +9,8 @@
   import LiveViewPanel from "./LiveViewPanel.svelte";
   import AutoTunePanel from "./components/AutoTunePanel.svelte";
   import { LayoutEnvironment, LayoutTrainer, FA2OptimizerAdapter, generateGraph, estimateEdges, clampNodeCount, MAX_EDGES, type FA2Params, type FA2ParamKey, type LayoutTickStats } from "./graph";
-  import { createGridOverlay, type GridOverlay } from "./graph/grid";
+   import { createGridOverlay, type GridOverlay } from "./graph/grid";
+   import { createCameraControls, type CameraControls } from "./graph/camera-controls";
   import { TrainingSessionModel, type TrainingSessionSnapshot } from "./graph/training-session";
   import type { TestBenchApplication, TestBenchState, TestBenchVisuals } from "./test-bench";
   import { layoutState, resetLayoutState, startLayout, stopLayout, recordTick, clearLayoutMetrics } from "./stores/layout-store.svelte";
@@ -30,7 +31,8 @@ import { optimizerState, setAutoTune, setEpisodeLength, toggleLock, updateTraine
   let sigma: Sigma | null = null;
   type WebGL2State = "unknown" | "available" | "unavailable";
   let webgl2State = $state<WebGL2State>("unknown");
-  let grid: GridOverlay | null = null;
+   let grid: GridOverlay | null = null;
+   let cameraControls: CameraControls | null = null;
   let resizeObserver: ResizeObserver | null = null;
   let rafId: number | null = null;
   let liveEnvironment = $state<LayoutEnvironment | null>(null);
@@ -443,14 +445,20 @@ import { optimizerState, setAutoTune, setEpisodeLength, toggleLock, updateTraine
     grid = createGridOverlay(host, { getSigma: () => sigma, getShow: () => uiState.showGrid });
     resizeObserver = new ResizeObserver(() => { sigma?.refresh(); grid?.draw(); resizeTrailCanvas(); });
     resizeObserver.observe(host);
-    sigma.getCamera().addListener("updated", () => { grid?.draw(); if (uiState.showTrails) drawTrails(); });
+    sigma.getCamera().addListener("updated", () => {
+      grid?.draw();
+      host?.dataset && (host.dataset.cameraState = JSON.stringify(sigma?.getCamera().getState() ?? {}));
+      if (uiState.showTrails) drawTrails();
+    });
+    host.dataset.cameraState = JSON.stringify(sigma.getCamera().getState());
+    cameraControls = createCameraControls(sigma, () => setAutoFit(false));
     sigma.on("enterNode", ({ node }: { node: string }) => { hovered = node; sigma?.refresh(); });
     sigma.on("leaveNode", () => { hovered = null; sigma?.refresh(); });
-    sigma.getMouseCaptor().on("wheel", () => setAutoFit(false));
-    sigma.getMouseCaptor().on("mousedown", () => setAutoFit(false));
   }
 
   function destroySigmaView(): void {
+    cameraControls?.destroy();
+    cameraControls = null;
     resizeObserver?.disconnect();
     resizeObserver = null;
     grid?.destroy();
@@ -531,7 +539,7 @@ import { optimizerState, setAutoTune, setEpisodeLength, toggleLock, updateTraine
         {/if}
       </div>
     </aside>
-   <main class="relative min-h-[420px] flex-1"><div class="absolute inset-0" bind:this={host}></div>{#if webgl2State === "unavailable"}<div role="alert" class="absolute inset-0 z-20 flex items-center justify-center bg-base-200 p-6 text-center"><p class="max-w-md text-sm">WebGL2 is unavailable, so this browser cannot render the graph. Enable hardware acceleration or use a WebGL2-capable browser, then reload the page.</p></div>{/if}<canvas class="pointer-events-none absolute inset-0 z-10" bind:this={trailCanvas}></canvas><div class="absolute bottom-3 right-3 z-20 flex flex-col gap-1 rounded bg-base-200/80 p-2 text-xs"><label><input type="checkbox" checked={uiState.autoFit} onchange={(event) => { setAutoFit(event.currentTarget.checked); if (event.currentTarget.checked) fitCamera(); }}/> Auto-fit</label><label><input type="checkbox" checked={uiState.showGrid} onchange={(event) => setShowGrid(event.currentTarget.checked)}/> Grid</label><label><input data-testid="trails" type="checkbox" checked={uiState.showTrails} onchange={(event) => { setShowTrails(event.currentTarget.checked); if (!event.currentTarget.checked) clearTrails(); else requestAnimationFrame(drawTrails); }}/> Trails</label>{#if uiState.showTrails}<input aria-label="Trail opacity" type="range" min="0" max="1" step="0.05" value={uiState.trailOpacity} oninput={(event) => setTrailOpacity(+event.currentTarget.value)}/>{/if}</div></main>
+    <main class="relative min-h-[420px] flex-1"><div class="absolute inset-0" data-testid="test-graph" bind:this={host}></div>{#if webgl2State === "unavailable"}<div role="alert" class="absolute inset-0 z-20 flex items-center justify-center bg-base-200 p-6 text-center"><p class="max-w-md text-sm">WebGL2 is unavailable, so this browser cannot render the graph. Enable hardware acceleration or use a WebGL2-capable browser, then reload the page.</p></div>{/if}<canvas class="pointer-events-none absolute inset-0 z-10" bind:this={trailCanvas}></canvas><div class="absolute bottom-3 right-3 z-20 flex flex-col gap-1 rounded bg-base-200/80 p-2 text-xs"><label><input type="checkbox" checked={uiState.autoFit} onchange={(event) => { setAutoFit(event.currentTarget.checked); if (event.currentTarget.checked) fitCamera(); }}/> Auto-fit</label><label><input type="checkbox" checked={uiState.showGrid} onchange={(event) => setShowGrid(event.currentTarget.checked)}/> Grid</label><label><input data-testid="trails" type="checkbox" checked={uiState.showTrails} onchange={(event) => { setShowTrails(event.currentTarget.checked); if (!event.currentTarget.checked) clearTrails(); else requestAnimationFrame(drawTrails); }}/> Trails</label>{#if uiState.showTrails}<input aria-label="Trail opacity" type="range" min="0" max="1" step="0.05" value={uiState.trailOpacity} oninput={(event) => setTrailOpacity(+event.currentTarget.value)}/>{/if}</div></main>
   </div>
       <section class="border-t border-base-300 bg-base-200"><div class="tabs tabs-lift tabs-sm p-1"><button class="tab {uiState.bottomTab === 'live' ? 'tab-active' : ''}" onclick={() => setBottomTab('live')}>Live View</button><button data-testid="autotune-tab" class="tab {uiState.bottomTab === 'autotune' ? 'tab-active' : ''}" onclick={() => { setBottomTab('autotune'); if (!uiState.bottomOpen) toggleBottomOpen(); }}>Auto-tune</button><button aria-label={uiState.bottomOpen ? 'Hide bottom panel' : 'Show bottom panel'} class="btn btn-xs btn-ghost ml-auto" onclick={toggleBottomOpen}>{uiState.bottomOpen ? '▼' : '▲'}</button></div>{#if uiState.bottomOpen}<div class="max-h-80 overflow-y-auto p-3">{#if uiState.bottomTab === 'live'}<LiveViewPanel stats={layoutState.tickStats} running={layoutState.running}/>{:else}<AutoTunePanel running={trainingIsActive()} snapshot={trainingSnapshot} bandit={optimizerState.optimState} onToggle={handleAutoTuneToggle} onTrainingPause={toggleTrainingPause} onHorizonChange={handleEpisodeLengthChange} onResetPolicy={handlePolicyReset}/>{/if}</div>{/if}</section>
 </div>
