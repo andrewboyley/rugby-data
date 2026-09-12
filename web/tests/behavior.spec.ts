@@ -120,6 +120,26 @@ test('test page persists graph settings and auto-tune reaches a valid state', as
   expect(errors.filter(error => /Sigma|Container/i.test(error))).toEqual([]);
 });
 
+test('graph range drafts do not recreate environments until their debounced commit', async ({ page }) => {
+  await page.goto('http://localhost:5173/test');
+  await page.getByRole('button', { name: 'Graph' }).click();
+  const nodeCount = page.getByTestId('node-count');
+  const initialIdentity = (await testBenchState(page)).graph.liveIdentity;
+
+  await nodeCount.evaluate((element) => {
+    const input = element as HTMLInputElement;
+    for (const value of ['60', '80', '100']) {
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  });
+
+  expect((await testBenchState(page)).graph.liveIdentity).toBe(initialIdentity);
+  await page.waitForTimeout(250);
+  expect((await testBenchState(page)).graph.liveIdentity).not.toBe(initialIdentity);
+  await expect(page.getByTestId('graph-count')).toContainText('100 nodes');
+});
+
 test('iteration horizon and parameter edits safely restart an active test episode', async ({ page }) => {
   await page.goto('http://localhost:5173/test');
   await page.getByTestId('autotune-tab').click();

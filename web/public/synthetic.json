@@ -1,0 +1,17 @@
+{
+  "games": [
+    {
+      "eventId": 1,
+      "date": "2020-01-01T12:00:00Z",
+      "competitors": [
+        {
+          "teamId": 39,
+          "score": 1,
+          "roster": [{"playerId": 1, "jersey": 10}]
+        }
+      ]
+    }
+  ],
+  "players": {"1": "Synthetic Player"},
+  "teams": {"39": "Synthetic Team"}
+}

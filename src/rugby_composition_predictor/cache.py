@@ -26,7 +26,7 @@ class ApiCache:
         self._path = path
         self._soft_write_limit = soft_write_limit
         self._lock = threading.Lock()
-        self._writes = 0
+        self._pending_writes = 0
         self._entries, self._processed = self._load()
 
     # ---- loading ----
@@ -75,6 +75,7 @@ class ApiCache:
     def put(self, url: str, data: Any) -> None:
         with self._lock:
             self._entries[url] = data
+            self._pending_writes += 1
         self.save()
 
     # ---- processed tracking ----
@@ -103,7 +104,7 @@ class ApiCache:
     def save(self, force: bool = False) -> None:
         """Write to disk, throttled unless force=True."""
         with self._lock:
-            if not force and self._writes < self._soft_write_limit:
+            if not force and self._pending_writes < self._soft_write_limit:
                 return
             payload = dict(self._entries)
             payload[CACHE_PROCESSED_KEY] = sorted(self._processed)
@@ -113,4 +114,4 @@ class ApiCache:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, self._path)
-            self._writes += 1
+            self._pending_writes = 0

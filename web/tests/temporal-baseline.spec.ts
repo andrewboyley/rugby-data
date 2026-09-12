@@ -33,7 +33,7 @@ test("captures production-shaped temporal viewer baseline", async ({ page }, tes
   await page.route("**/data/dataset.json", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(productionFixture) }));
 
   const startedAt = Date.now();
-  await page.goto("/");
+  await page.goto("/#dataset=/data/dataset.json");
   await expect(page.getByTestId("main-graph")).toBeVisible({ timeout: 60_000 });
   await page.getByRole("button", { name: "Timeline", exact: true }).click();
   await expect(page.getByTestId("timeline-panel")).toBeVisible();

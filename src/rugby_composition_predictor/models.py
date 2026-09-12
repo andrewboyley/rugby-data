@@ -18,7 +18,11 @@ class Competitor:
     coach_id: str | None = None
 
     def is_complete(self) -> bool:
-        return bool(self.roster) and self.score is not None
+        return (
+            bool(self.roster)
+            and self.score is not None
+            and all(entry.player_id for entry in self.roster)
+        )
 
 
 @dataclass
@@ -35,9 +39,12 @@ class Game:
         )
 
 
-def roster_from_dict(data: dict) -> RosterEntry:
+def roster_from_dict(data: dict) -> RosterEntry | None:
+    player_id = str(data.get("playerId") or "").strip()
+    if not player_id:
+        return None
     return RosterEntry(
-        player_id=str(data["playerId"]),
+        player_id=player_id,
         jersey=_parse_jersey(data["jersey"]),
     )
 
@@ -47,11 +54,12 @@ def roster_to_dict(entry: RosterEntry) -> dict:
 
 
 def competitor_from_dict(data: dict) -> Competitor:
+    roster = [roster_from_dict(entry) for entry in data.get("roster", [])]
     return Competitor(
         team_id=int(data["teamId"]),
         home=bool(data["home"]),
         score=data["score"],
-        roster=[roster_from_dict(e) for e in data.get("roster", [])],
+        roster=[entry for entry in roster if entry is not None],
         coach_id=data.get("coachId"),
     )
 

@@ -1,6 +1,10 @@
 import FA2Layout from "graphology-layout-forceatlas2/worker.js";
 import type Graph from "graphology";
-import type { PositionSnapshot } from "../scene/scene";
+
+export type PositionSnapshot = Readonly<{
+  sequence: number;
+  positions: Float32Array;
+}>;
 
 type Matrix = { nodes: Float32Array; edges: Float32Array };
 type Supervisor = {
@@ -134,13 +138,9 @@ export class PersistentForceAtlas2 {
       this.scheduleIterations(true);
       return;
     }
-    let index = 0;
-    this.graph.updateEachNodeAttributes((_node, attrs) => {
-      attrs.x = nodes[index]!;
-      attrs.y = nodes[index + 1]!;
-      index += 10;
-      return attrs;
-    });
+    // The worker matrix is the source of truth between iterations. Mutating the
+    // private all-time graph here emits an all-node update for data that no
+    // consumer reads, blocking camera interaction on every worker message.
     this.queuePositionPublication(nodes);
     if (this.layout.matrices) this.layout.matrices.nodes = nodes;
     this.scheduleIterations();

@@ -15,7 +15,7 @@
   import type { TestBenchApplication, TestBenchState, TestBenchVisuals } from "./test-bench";
   import { layoutState, resetLayoutState, startLayout, stopLayout, recordTick, clearLayoutMetrics } from "./stores/layout-store.svelte";
 import { optimizerState, setAutoTune, setEpisodeLength, toggleLock, updateTrainerStats, addEpisodeMean, recordCalibrationStep } from "./stores/optimizer-store.svelte";
-  import { uiState, setGraph, setSettingsTab, setBottomTab, toggleBottomOpen, setNodeCount, setClusterCount, setDegreeRatio, setEdgeWeight, setFixedSeed, setOnlyWithinCluster, setAutoFit, setShowGrid, setShowTrails, setTrailOpacity } from "./stores/ui-store.svelte";
+   import { uiState, setGraph, setSettingsTab, setBottomTab, toggleBottomOpen, setNodeCount, setClusterCount, setDegreeRatio, setEdgeWeight, setFixedSeed, setOnlyWithinCluster, setGraphGenerationSettings, setAutoFit, setShowGrid, setShowTrails, setTrailOpacity, type GraphGenerationSettings } from "./stores/ui-store.svelte";
 
   const DEFAULT_FA2_SETTINGS: FA2Params = {
     gravity: 0.1, slowDown: 1, scalingRatio: 1, strongGravityMode: true,
@@ -49,8 +49,17 @@ import { optimizerState, setAutoTune, setEpisodeLength, toggleLock, updateTraine
   let trailSegmentCount = 0;
   const optimizer = new FA2OptimizerAdapter();
   let trainingSession = createTrainingSession(DEFAULT_FA2_SETTINGS);
-  let trainingSnapshot = $state<TrainingSessionSnapshot>(trainingSession.snapshot());
-  let strictBestApplication = $state<TestBenchApplication | null>(null);
+   let trainingSnapshot = $state<TrainingSessionSnapshot>(trainingSession.snapshot());
+   let strictBestApplication = $state<TestBenchApplication | null>(null);
+   let graphDraft = $state<GraphGenerationSettings>({
+     nodeCount: uiState.nodeCount,
+     clusterCount: uiState.clusterCount,
+     degreeRatio: uiState.degreeRatio,
+     edgeWeight: uiState.edgeWeight,
+     fixedSeed: uiState.fixedSeed,
+     onlyWithinCluster: uiState.onlyWithinCluster,
+   });
+   let graphCommitTimer: ReturnType<typeof setTimeout> | null = null;
 
   const estEdgeCount = $derived(estimateEdges({ nodeCount: uiState.nodeCount, clusterCount: uiState.clusterCount, degreeRatio: uiState.degreeRatio, edgeWeight: uiState.edgeWeight, seed: uiState.fixedSeed }));
 
@@ -131,8 +140,34 @@ import { optimizerState, setAutoTune, setEpisodeLength, toggleLock, updateTraine
       if (typeof data.showGrid === "boolean") setShowGrid(data.showGrid);
       if (typeof data.showTrails === "boolean") setShowTrails(data.showTrails);
       if (typeof data.trailOpacity === "number" && Number.isFinite(data.trailOpacity)) setTrailOpacity(Math.max(0, Math.min(1, data.trailOpacity)));
-    } catch { /* A malformed old preference must not prevent rendering. */ }
-  }
+     } catch { /* A malformed old preference must not prevent rendering. */ }
+     graphDraft = {
+       nodeCount: uiState.nodeCount,
+       clusterCount: uiState.clusterCount,
+       degreeRatio: uiState.degreeRatio,
+       edgeWeight: uiState.edgeWeight,
+       fixedSeed: uiState.fixedSeed,
+       onlyWithinCluster: uiState.onlyWithinCluster,
+     };
+   }
+
+   function commitGraphDraft(): void {
+     if (graphCommitTimer !== null) {
+       clearTimeout(graphCommitTimer);
+       graphCommitTimer = null;
+     }
+     graphDraft.nodeCount = clampNodeCount({ ...graphDraft, seed: graphDraft.fixedSeed }).nodeCount;
+     setGraphGenerationSettings({ ...graphDraft });
+   }
+
+   function scheduleGraphCommit(): void {
+     if (graphCommitTimer !== null) clearTimeout(graphCommitTimer);
+     graphCommitTimer = setTimeout(() => {
+       graphCommitTimer = null;
+       graphDraft.nodeCount = clampNodeCount({ ...graphDraft, seed: graphDraft.fixedSeed }).nodeCount;
+       setGraphGenerationSettings({ ...graphDraft });
+     }, 150);
+   }
 
   $effect(() => {
     if (!settingsLoaded) return;
@@ -516,7 +551,7 @@ import { optimizerState, setAutoTune, setEpisodeLength, toggleLock, updateTraine
   function clearTrails(): void { trailSegmentCount = 0; trailCanvas?.getContext("2d")?.clearRect(0, 0, trailCanvas.width, trailCanvas.height); }
   function captureTrails(positions: Record<string, { x: number; y: number }>): void { for (const [id, position] of Object.entries(positions)) { const points = trailHistory.get(id) ?? []; points.push(position); trailHistory.set(id, points.slice(-20)); } }
   function drawTrails(): void { if (!trailCanvas || !sigma || !liveEnvironment) return; resizeTrailCanvas(); const context = trailCanvas.getContext("2d"); if (!context) return; const dpr = devicePixelRatio || 1; context.setTransform(dpr, 0, 0, dpr, 0, 0); context.clearRect(0, 0, trailCanvas.width / dpr, trailCanvas.height / dpr); context.lineWidth = 3; let segments = 0; liveEnvironment.graph.forEachNode((id) => { const points = trailHistory.get(id) ?? []; for (let index = 1; index < points.length; index++) { const a = sigma!.graphToViewport(points[index - 1]); const b = sigma!.graphToViewport(points[index]); context.strokeStyle = `rgba(245, 159, 0, ${Math.max(0.5, uiState.trailOpacity * index / points.length)})`; context.beginPath(); context.moveTo(a.x, a.y); context.lineTo(b.x, b.y); context.stroke(); segments++; } }); trailSegmentCount = segments; }
-   onDestroy(() => { stopAllScheduling(); destroySigmaView(); clearTrails(); trailCanvas?.remove(); liveEnvironment?.close(); trialEnvironment?.close(); setGraph(null); });
+    onDestroy(() => { if (graphCommitTimer !== null) clearTimeout(graphCommitTimer); stopAllScheduling(); destroySigmaView(); clearTrails(); trailCanvas?.remove(); liveEnvironment?.close(); trialEnvironment?.close(); setGraph(null); });
 </script>
 
 <div class="flex h-screen min-w-[480px] flex-col overflow-auto bg-base-100" data-testid="test-page">
@@ -530,11 +565,11 @@ import { optimizerState, setAutoTune, setEpisodeLength, toggleLock, updateTraine
   {#if !optimizerState.autoTune}<label class="label text-xs">Iterations per tick <input data-testid="manual-iterations-per-tick" class="range range-xs" type="range" min="1" max="3" step="1" bind:value={manualIterationsPerTick} onchange={handleManualIterationsChange}/><span>{manualIterationsPerTick}</span></label>{/if}
             <div class="mt-2 flex gap-2"><button data-testid="start-stop" class="btn btn-sm flex-1" onclick={() => layoutState.running ? stopLayoutFn() : startLayoutFn()}>{layoutState.running ? 'Stop Layout' : 'Start Layout'}</button><button data-testid="reset" class="btn btn-sm btn-ghost" onclick={resetAll}>Reset</button></div>
         {:else}
-          <label class="label text-xs">Nodes <input data-testid="node-count" class="range range-xs" type="range" min="1" max="1000" bind:value={uiState.nodeCount}/><span>{uiState.nodeCount}</span></label>
-          <label class="label text-xs">Clusters <input class="range range-xs" type="range" min="1" max="20" bind:value={uiState.clusterCount}/><span>{uiState.clusterCount}</span></label>
-          <label class="label text-xs">Degree ratio <input class="range range-xs" type="range" min="0.01" max="1" step="0.01" bind:value={uiState.degreeRatio}/><span>{uiState.degreeRatio.toFixed(2)}</span></label>
-          <label class="label text-xs">Seed <input data-testid="seed" class="input input-xs input-bordered" type="number" bind:value={uiState.fixedSeed}/></label>
-          <label class="label cursor-pointer text-xs"><input class="checkbox checkbox-xs" type="checkbox" bind:checked={uiState.onlyWithinCluster}/>Only within cluster</label>
+          <label class="label text-xs">Nodes <input data-testid="node-count" class="range range-xs" type="range" min="1" max="1000" value={graphDraft.nodeCount} oninput={(event) => { graphDraft.nodeCount = Number(event.currentTarget.value); scheduleGraphCommit(); }} onchange={commitGraphDraft}/><span>{graphDraft.nodeCount}</span></label>
+          <label class="label text-xs">Clusters <input class="range range-xs" type="range" min="1" max="20" value={graphDraft.clusterCount} oninput={(event) => { graphDraft.clusterCount = Number(event.currentTarget.value); scheduleGraphCommit(); }} onchange={commitGraphDraft}/><span>{graphDraft.clusterCount}</span></label>
+          <label class="label text-xs">Degree ratio <input class="range range-xs" type="range" min="0.01" max="1" step="0.01" value={graphDraft.degreeRatio} oninput={(event) => { graphDraft.degreeRatio = Number(event.currentTarget.value); scheduleGraphCommit(); }} onchange={commitGraphDraft}/><span>{graphDraft.degreeRatio.toFixed(2)}</span></label>
+          <label class="label text-xs">Seed <input data-testid="seed" class="input input-xs input-bordered" type="number" value={graphDraft.fixedSeed} oninput={(event) => { graphDraft.fixedSeed = Number(event.currentTarget.value); commitGraphDraft(); }}/></label>
+          <label class="label cursor-pointer text-xs"><input class="checkbox checkbox-xs" type="checkbox" checked={graphDraft.onlyWithinCluster} onchange={(event) => { graphDraft.onlyWithinCluster = event.currentTarget.checked; commitGraphDraft(); }}/>Only within cluster</label>
             <p data-testid="graph-count" class="font-mono text-xs">Generated graph: {liveEnvironment?.graph.order ?? 0} nodes, {liveEnvironment?.graph.size ?? 0} edges. Est. {estEdgeCount} / {MAX_EDGES}</p>
         {/if}
       </div>

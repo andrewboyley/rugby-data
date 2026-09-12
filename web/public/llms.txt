@@ -1,0 +1,7 @@
+# Rugby Composition Predictor
+
+This browser application visualizes temporal co-occurrence graphs from an explicitly supplied synthetic dataset.
+
+## Documentation
+
+- [Project README](https://github.com/andrewboyley/rugby-graph/blob/main/README.md)

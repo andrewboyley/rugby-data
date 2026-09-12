@@ -31,9 +31,10 @@ export function createTemporalSupergraph(dataset: DatasetLike, temporalIndex: Te
     const coachId = nodeId.startsWith("c_") ? nodeId.slice(2) : null;
     const count = temporalIndex.allTimeNodeCounts[temporalNodeIndex];
     const angle = (temporalNodeIndex / temporalIndex.nodeIds.length) * Math.PI * 2;
+    const radius = temporalIndex.nodeIds.length === 1 ? 0 : 100;
     graph.addNode(nodeId, {
-      x: Math.cos(angle) * 100,
-      y: Math.sin(angle) * 100,
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
       label: coachId == null ? dataset.players?.[nodeId] ?? nodeId : dataset.coaches?.[coachId] ?? nodeId,
       isCoach: coachId != null,
       teams,

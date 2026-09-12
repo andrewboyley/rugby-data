@@ -108,21 +108,6 @@ class Dataset:
     def player_name(self, player_id: str) -> str | None:
         return self.players.get(player_id)
 
-    def player_id_by_name(self, name: str) -> str | None:
-        """Best-effort reverse lookup of a player id by display name.
-
-        Used to canonicalise ESPN-sourced players onto their RIMS/Opta id
-        when the two sources share a name. Returns None on no match or on
-        an ambiguous (non-unique) name.
-        """
-        if not name:
-            return None
-        with self._lock:
-            matches = [pid for pid, n in self.players.items() if n == name]
-        if len(matches) == 1:
-            return matches[0]
-        return None
-
     def register_player(self, player_id: str, name: str) -> None:
         with self._lock:
             self.players[player_id] = name

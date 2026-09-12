@@ -1,12 +1,8 @@
 """World Rugby RIMS API client with caching, retries, rate limiting,
 and activity tracking."""
 
-import json
-import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections import deque
 
 from .cache import ApiCache
@@ -18,24 +14,7 @@ from .config import (
     RIMS_RATE_LIMIT_PER_MIN,
     USER_AGENT,
 )
-
-
-class ActivityTracker:
-    """Thread-safe snapshot of what the API client is currently doing."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._action = "idle"
-        self._fetches = 0
-
-    def record(self, action: str) -> None:
-        with self._lock:
-            self._action = action
-            self._fetches += 1
-
-    def snapshot(self) -> tuple[str, int]:
-        with self._lock:
-            return self._action, self._fetches
+from .transport import ActivityTracker, CachedJsonTransport
 
 
 class RateLimiter:
@@ -82,15 +61,21 @@ class RimsApi:
         self._user_agent = user_agent
         self._limiter = RateLimiter(rate_limit_per_min)
         self.activity = ActivityTracker()
+        self._transport = CachedJsonTransport(
+            cache,
+            self.activity,
+            self._describe,
+            headers={"User-Agent": user_agent, **RIMS_HEADERS},
+            retries=retries,
+            timeout=timeout,
+            retry_delay=self._retry_delay,
+        )
 
     def get(self, url: str) -> dict:
         if url in self._cache:
             return self._cache.get(url)
         self._limiter.wait()
-        self.activity.record(self._describe(url))
-        data = self._fetch(url)
-        self._cache.put(url, data)
-        return data
+        return self._transport.get(url)
 
     def matches_for_year(self, year: int) -> list[dict]:
         """Return all completed matches in a given year."""
@@ -137,32 +122,10 @@ class RimsApi:
         url = f"{self._base_url}/match/{match_id}/summary"
         return self.get(url)
 
-    def _fetch(self, url: str) -> dict:
-        headers = {"User-Agent": self._user_agent, **RIMS_HEADERS}
-        request = urllib.request.Request(url, headers=headers)
-        for attempt in range(self._retries):
-            try:
-                with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                    return json.load(response)
-            except urllib.error.HTTPError as e:
-                if 400 <= e.code < 500 and e.code != 429:
-                    raise
-                backoff = 2**attempt
-                if e.code == 429:
-                    backoff = max(backoff, 10)
-                print(
-                    f"  [retry {attempt}] {self._describe(url)}: {e}", file=sys.stderr
-                )
-                time.sleep(backoff)
-            except (OSError, json.JSONDecodeError) as e:
-                backoff = 2**attempt
-                if isinstance(e, urllib.error.HTTPError) and e.code == 429:
-                    backoff = max(backoff, 10)
-                print(
-                    f"  [retry {attempt}] {self._describe(url)}: {e}", file=sys.stderr
-                )
-                time.sleep(backoff)
-        raise RuntimeError(f"failed after {self._retries} attempts: {url}")
+    def _retry_delay(self, error: Exception, attempt: int) -> float:
+        if getattr(error, "code", None) == 429:
+            return max(2**attempt, 10)
+        return 2**attempt
 
     def _describe(self, url: str) -> str:
         path = url.replace(self._base_url, "").split("?")[0].rstrip("/")

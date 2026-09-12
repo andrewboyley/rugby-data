@@ -7,14 +7,8 @@ flag, and the athlete id), so it is the natural source for lineups when the
 CORE API has none.
 """
 
-import json
 import re
-import sys
-import time
-import urllib.error
-import urllib.request
 
-from .api import ActivityTracker
 from .cache import ApiCache
 from .config import (
     REQUEST_TIMEOUT_SECONDS,
@@ -22,6 +16,7 @@ from .config import (
     SITE_WEB_API_BASE,
     USER_AGENT,
 )
+from .transport import ActivityTracker, CachedJsonTransport
 
 
 class EspnSiteWebApi:
@@ -40,6 +35,14 @@ class EspnSiteWebApi:
         self._timeout = timeout
         self._user_agent = user_agent
         self.activity = ActivityTracker()
+        self._transport = CachedJsonTransport(
+            cache,
+            self.activity,
+            self._describe,
+            headers={"User-Agent": user_agent},
+            retries=retries,
+            timeout=timeout,
+        )
 
     def get_summary(self, league_id: str, event_id: str) -> dict:
         url = (
@@ -49,32 +52,7 @@ class EspnSiteWebApi:
         return self.get(url)
 
     def get(self, url: str) -> dict:
-        if url in self._cache:
-            return self._cache.get(url)
-        self.activity.record(self._describe(url))
-        data = self._fetch(url)
-        self._cache.put(url, data)
-        return data
-
-    def _fetch(self, url: str) -> dict:
-        request = urllib.request.Request(url, headers={"User-Agent": self._user_agent})
-        for attempt in range(self._retries):
-            try:
-                with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                    return json.load(response)
-            except urllib.error.HTTPError as e:
-                if 400 <= e.code < 500 and e.code != 429:
-                    raise
-                print(
-                    f"  [retry {attempt}] {self._describe(url)}: {e}", file=sys.stderr
-                )
-                time.sleep(2**attempt)
-            except (OSError, json.JSONDecodeError) as e:
-                print(
-                    f"  [retry {attempt}] {self._describe(url)}: {e}", file=sys.stderr
-                )
-                time.sleep(2**attempt)
-        raise RuntimeError(f"failed after {self._retries} attempts: {url}")
+        return self._transport.get(url)
 
     def _describe(self, url: str) -> str:
         path = url.replace(self._base_url, "").split("?")[0].rstrip("/")

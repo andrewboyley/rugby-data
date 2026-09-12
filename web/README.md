@@ -1,8 +1,10 @@
 # Rugby composition viewer
 
 Svelte 5 + Vite single-page app for the player co-occurrence graph. The main
-page currently starts with an empty dataset so the base graph interactions can
-be developed and tested without loading `data/dataset.json`.
+page loads the included single-player synthetic fixture by default. Supply
+another synthetic dataset with `/#dataset=/data/example.json`. Loading and
+failure states appear as toasts. Browser tests route `/data/dataset.json` to
+fixture data.
 
 ## Develop
 
@@ -23,6 +25,5 @@ Serve the built app with Vite (also serves `/data/*` from the repo):
 npm run preview  # http://localhost:8787/
 ```
 
-The dev and preview servers still proxy `/data/dataset.json` to the repo's
-`data/` directory via a small Vite plugin (`vite.config.js`) for future dataset
-loading work.
+The dev and preview servers serve `/data/dataset.json` from the repository
+`data/` directory via the `repo-data` Vite plugin (`vite.config.ts`).

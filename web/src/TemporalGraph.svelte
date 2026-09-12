@@ -1,17 +1,19 @@
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
   import Sigma from "sigma";
+  import { sdfCircle } from "sigma/rendering";
   import { createGridOverlay, type GridOverlay } from "./graph/grid";
   import { createCameraControls } from "./graph/camera-controls";
   import { fitAll } from "./graph/camera";
   import { TimelineController } from "./TimelineController";
   import { RenderScheduler } from "./graph/RenderScheduler";
-  import { selectRendererAdapter, v4Renderer } from "./graph/renderer";
-  import type { SigmaV4SceneRendererHandle } from "./graph/SigmaV4SceneRenderer";
   import { createTemporalEdgeReducer, createTemporalNodeReducer } from "./graph/reducers";
   import type { DatasetLike } from "./temporal/types";
 
   type TemporalFilters = { teamId: number | null; minMatchCount: number; edgeColorMode: "shared" | "winRate" | "recency"; selectedId: string | null; partnerId: string | null; matchPlayerIds: Set<string> | null };
+  const primitives = {
+    nodes: { shapes: [sdfCircle()] },
+  } as const;
   let { dataset, time, grid = false, autoFit = true, trails = false, fitRequest = 0, homeRequest = 0, initialPosition = "min", filters, onAutoFitChange = () => {}, onReady = () => {}, onTime = () => {}, onPlayingChange = () => {}, onSelect = () => {} }: { dataset: DatasetLike; time: number; grid?: boolean; autoFit?: boolean; trails?: boolean; fitRequest?: number; homeRequest?: number; initialPosition?: "min" | "max"; filters: TemporalFilters; onAutoFitChange?: (enabled: boolean) => void; onReady?: (controller: TimelineController) => void; onTime?: (time: number) => void; onPlayingChange?: (playing: boolean) => void; onSelect?: (node: string | null) => void } = $props();
   let host = $state<HTMLElement | null>(null);
   let controller = $state<TimelineController | null>(null);
@@ -29,6 +31,7 @@
   let trailFrame: number | null = null;
   let trailCanvas: HTMLCanvasElement | null = null;
   let previousHomeRequest: number | null = null;
+  let previousAutoFit: boolean | null = null;
   const trailsByNode = new Map<string, Array<{ x: number; y: number }>>();
 
   function updateTopologyStats(source: TimelineController | null): void {
@@ -40,7 +43,7 @@
     seekApplies = source?.seekApplies ?? 0;
   }
 
-  function fitGraph(): void { fitAll(sigma, controller?.graph ?? null, { animate: false }); }
+  function fitGraph(animate = false): void { fitAll(sigma, controller?.graph ?? null, { animate }); }
   function resetHome(animate = false): void {
     if (!sigma) return;
     const camera = sigma.getCamera();
@@ -82,25 +85,29 @@
     const notifyPlayingChange = untrack(() => onPlayingChange);
     const notifyReady = untrack(() => onReady);
     const notifySelection = untrack(() => onSelect);
+    const currentTime = () => untrack(() => time);
+    const currentFilters = () => untrack(() => filters);
     // UI resets seek this controller; initialPosition must not recreate FA2.
     let constructed: TimelineController | null = null;
     const nextController = new TimelineController(dataset, (currentTime) => { if (constructed) updateTopologyStats(constructed); notifyTime(currentTime); }, notifyPlayingChange, untrack(() => initialPosition));
     constructed = nextController;
     controller = nextController;
     updateTopologyStats(nextController);
-    const useV4 = untrack(() => true);
-    let sceneHandle: SigmaV4SceneRendererHandle | null = null;
-    if (useV4 && v4Renderer.sceneRenderer) {
-      sceneHandle = v4Renderer.sceneRenderer(nextController.graph, graphHost, []);
-      sigma = sceneHandle.sigma;
-    } else {
-      const renderer = selectRendererAdapter({ advancedAdapterVerified: false }, null);
-      sigma = untrack(() => renderer.create(nextController.graph, graphHost, {
-        nodeReducer: createTemporalNodeReducer({ graph: () => nextController.graph, temporalIndex: () => nextController.temporalIndex, time: () => time, teamId: () => filters.teamId, minMatchCount: () => filters.minMatchCount, edgeColorMode: () => filters.edgeColorMode, selectedId: () => filters.selectedId, partnerId: () => filters.partnerId, matchPlayerIds: () => filters.matchPlayerIds }),
-        edgeReducer: createTemporalEdgeReducer({ graph: () => nextController.graph, temporalIndex: () => nextController.temporalIndex, time: () => time, teamId: () => filters.teamId, minMatchCount: () => filters.minMatchCount, edgeColorMode: () => filters.edgeColorMode, selectedId: () => filters.selectedId, partnerId: () => filters.partnerId, matchPlayerIds: () => filters.matchPlayerIds }),
-      }));
-    }
-    gridOverlay = createGridOverlay(graphHost, { getSigma: () => sigma, getShow: () => grid });
+    sigma = new Sigma(nextController.graph, graphHost, {
+      primitives,
+      styles: {
+        nodes: { color: { attribute: "color" }, size: { attribute: "size" } },
+        edges: { color: { attribute: "color" }, size: { attribute: "size" } },
+      },
+      settings: {
+        allowInvalidContainer: true,
+        itemSizesReference: "positions",
+        autoRescale: false,
+      },
+      nodeReducer: createTemporalNodeReducer({ graph: () => nextController.graph, temporalIndex: () => nextController.temporalIndex, time: currentTime, teamId: () => currentFilters().teamId, minMatchCount: () => currentFilters().minMatchCount, edgeColorMode: () => currentFilters().edgeColorMode, selectedId: () => currentFilters().selectedId, partnerId: () => currentFilters().partnerId, matchPlayerIds: () => currentFilters().matchPlayerIds }),
+      edgeReducer: createTemporalEdgeReducer({ graph: () => nextController.graph, temporalIndex: () => nextController.temporalIndex, time: currentTime, teamId: () => currentFilters().teamId, minMatchCount: () => currentFilters().minMatchCount, edgeColorMode: () => currentFilters().edgeColorMode, selectedId: () => currentFilters().selectedId, partnerId: () => currentFilters().partnerId, matchPlayerIds: () => currentFilters().matchPlayerIds }),
+    });
+    gridOverlay = createGridOverlay(graphHost, { getSigma: () => sigma, getShow: () => untrack(() => grid) });
     const resizeObserver = new ResizeObserver(() => {
       sigma?.refresh({ schedule: true });
       gridOverlay?.draw();
@@ -118,36 +125,55 @@
     const initialResizeFrame = requestAnimationFrame(() => {
       sigma?.resize(true);
       sigma?.refresh();
-      resetHome();
+      if (untrack(() => autoFit)) fitGraph();
+      else resetHome();
       gridOverlay?.draw();
     });
     const onCameraInput = () => {
-      if (autoFit) onAutoFitChange(false);
+      if (untrack(() => autoFit)) onAutoFitChange(false);
     };
     const cameraControls = createCameraControls(sigma, onCameraInput);
     renderScheduler = new RenderScheduler({
-      renderer: sceneHandle?.renderer ?? { render: sigma!.refresh.bind(sigma!) },
+      renderer: { render: sigma.refresh.bind(sigma) },
       process: ({ seekTime }) => {
         if (seekTime !== null) nextController.applyScheduledSeek(seekTime);
         updateTopologyStats(nextController);
       },
     });
     nextController.attachRenderScheduler(renderScheduler);
+    const unsubscribePositions = nextController.layout.subscribe?.(({ positions }) => {
+      // The worker lays out every player, including the inactive supergraph.
+      // Updating all of them emits a full Sigma refresh on every publication.
+      // Only visible nodes need scene positions, and graphology gives Sigma a
+      // cheap partial refresh for each of these merged attributes.
+      nextController.temporalIndex.nodeIds.forEach((node, index) => {
+        if (nextController.temporalIndex.state.nodeActive[index] === 0) return;
+        nextController.graph.mergeNodeAttributes(node, {
+          x: positions[index * 2]!,
+          y: positions[index * 2 + 1]!,
+        });
+      });
+    });
     graphHost.dataset.cameraState = JSON.stringify(sigma.getCamera().getState());
     sigma.on("clickNode", ({ node }) => notifySelection(node));
     notifyReady(nextController);
-    return () => { if (cameraFrame !== null) cancelAnimationFrame(cameraFrame); if (gridFrame !== null) cancelAnimationFrame(gridFrame); if (trailFrame !== null) cancelAnimationFrame(trailFrame); cancelAnimationFrame(initialResizeFrame); resizeObserver.disconnect(); cameraControls.destroy(); sigma?.getCamera().removeListener("updated", onCameraUpdated); gridOverlay?.destroy(); gridOverlay = null; renderScheduler?.dispose(); renderScheduler = null; sceneHandle?.dispose(); sigma?.kill(); nextController.dispose(); sigma = null; controller = null; };
+    return () => { if (cameraFrame !== null) cancelAnimationFrame(cameraFrame); if (gridFrame !== null) cancelAnimationFrame(gridFrame); if (trailFrame !== null) cancelAnimationFrame(trailFrame); cancelAnimationFrame(initialResizeFrame); resizeObserver.disconnect(); cameraControls.destroy(); sigma?.getCamera().removeListener("updated", onCameraUpdated); gridOverlay?.destroy(); gridOverlay = null; renderScheduler?.dispose(); renderScheduler = null; unsubscribePositions?.(); sigma?.kill(); nextController.dispose(); sigma = null; controller = null; };
   });
 
   $effect(() => { if (controller && time !== controller.currentTime) { controller.requestSeek(time); updateTopologyStats(controller); } });
   $effect(() => { time; updateTopologyStats(controller); });
   $effect(() => { filters.teamId; filters.minMatchCount; filters.edgeColorMode; filters.selectedId; filters.partnerId; filters.matchPlayerIds; time; renderScheduler?.invalidate("scene", "overlays"); });
   $effect(() => { grid; if (gridFrame !== null) cancelAnimationFrame(gridFrame); gridFrame = requestAnimationFrame(() => { gridFrame = null; gridOverlay?.draw(); }); });
-  $effect(() => { autoFit; fitRequest; if (autoFit) fitGraph(); });
+  $effect(() => {
+    const animate = previousAutoFit === false && autoFit;
+    previousAutoFit = autoFit;
+    fitRequest;
+    if (autoFit) fitGraph(animate);
+  });
   $effect(() => {
     const animate = previousHomeRequest !== null && homeRequest !== previousHomeRequest;
     previousHomeRequest = homeRequest;
-    resetHome(animate);
+    if (animate) resetHome(true);
     if (sigma && host) host.dataset.cameraState = JSON.stringify(sigma.getCamera().getState());
   });
   $effect(() => { trails; if (trailFrame !== null) cancelAnimationFrame(trailFrame); trailFrame = requestAnimationFrame(drawTrails); });

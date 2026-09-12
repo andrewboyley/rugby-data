@@ -1,5 +1,3 @@
-import type { SceneRendererPort } from "../scene/scene";
-
 export type RenderDirtyFlag = "timeline" | "scene" | "layout" | "camera" | "overlays";
 
 export type RenderWork = Readonly<{
@@ -14,7 +12,7 @@ type FrameClock = Readonly<{
 }>;
 
 export type RenderSchedulerOptions = Readonly<{
-  renderer: Pick<SceneRendererPort, "render">;
+  renderer: Readonly<{ render(): void }>;
   process(work: RenderWork): void;
   clock?: FrameClock;
 }>;

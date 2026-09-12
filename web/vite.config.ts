@@ -35,14 +35,15 @@ async function readCached(target: string) {
 
 function repoData() {
   const handleData = (req: any, res: any, next: () => void) => {
-    const target = path.join(repoRoot, "data", req.url);
     const root = path.join(repoRoot, "data");
+    const pathname = new URL(req.url, "http://localhost").pathname;
+    const target = path.resolve(root, `.${pathname}`);
     let safe = false;
     try {
       safe =
         existsSync(target) &&
         statSync(target).isFile() &&
-        path.resolve(target).startsWith(root);
+        target.startsWith(`${root}${path.sep}`);
     } catch (e) {
       // If any synchronous check fails, treat as unsafe to prevent 500 errors
       safe = false;

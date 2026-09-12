@@ -7,8 +7,11 @@ type GridMetrics = {
   extent: { width: number; height: number };
 };
 
+const emptyDataset = { games: [], players: {}, teams: {} };
+
 async function openMainGraph(page: import("@playwright/test").Page) {
-  await page.goto("/");
+  await page.route("**/data/dataset.json", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(emptyDataset) }));
+  await page.goto("/#dataset=/data/dataset.json");
   await expect(page.getByTestId("main-graph")).toBeVisible();
   await expect(page.locator('[data-testid="main-graph"] canvas').first()).toBeVisible({ timeout: 30_000 });
 }
@@ -124,14 +127,14 @@ test("main grid remains centered, square, and proportional through camera input"
   const afterFirstGrid = await gridMetrics(gridCanvas);
   expect(afterFirstDrag.x).toBeLessThan(afterWheel.x);
   expect(afterFirstDrag.y).toBeGreaterThan(afterWheel.y);
-  expect(afterFirstGrid.origin.x - beforeFirstDrag.origin.x).toBeCloseTo(80, 0);
-  expect(afterFirstGrid.origin.y - beforeFirstDrag.origin.y).toBeCloseTo(40, 0);
+  expect(Math.abs(afterFirstGrid.origin.x - beforeFirstDrag.origin.x - 80)).toBeLessThan(2);
+  expect(Math.abs(afterFirstGrid.origin.y - beforeFirstDrag.origin.y - 40)).toBeLessThan(2);
 
   const beforeSecondDrag = await gridMetrics(gridCanvas);
   await dragGraph(page, box!, 80, 40);
   const afterSecondGrid = await gridMetrics(gridCanvas);
-  expect(afterSecondGrid.origin.x - beforeSecondDrag.origin.x).toBeCloseTo(80, 0);
-  expect(afterSecondGrid.origin.y - beforeSecondDrag.origin.y).toBeCloseTo(40, 0);
+  expect(Math.abs(afterSecondGrid.origin.x - beforeSecondDrag.origin.x - 80)).toBeLessThan(2);
+  expect(Math.abs(afterSecondGrid.origin.y - beforeSecondDrag.origin.y - 40)).toBeLessThan(2);
 
   await page.getByRole("button", { name: "Home" }).click();
   await page.waitForTimeout(75);

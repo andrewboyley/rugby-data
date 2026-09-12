@@ -1,12 +1,5 @@
 """ESPN CORE API client with caching, retries, and activity tracking."""
 
-import json
-import sys
-import threading
-import time
-import urllib.error
-import urllib.request
-
 from .cache import ApiCache
 from .config import (
     CORE_API_BASE,
@@ -14,24 +7,7 @@ from .config import (
     RETRY_ATTEMPTS,
     USER_AGENT,
 )
-
-
-class ActivityTracker:
-    """Thread-safe snapshot of what the API client is currently doing."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._action = "idle"
-        self._fetches = 0
-
-    def record(self, action: str) -> None:
-        with self._lock:
-            self._action = action
-            self._fetches += 1
-
-    def snapshot(self) -> tuple[str, int]:
-        with self._lock:
-            return self._action, self._fetches
+from .transport import ActivityTracker, CachedJsonTransport
 
 
 class EspnApi:
@@ -50,14 +26,17 @@ class EspnApi:
         self._timeout = timeout
         self._user_agent = user_agent
         self.activity = ActivityTracker()
+        self._transport = CachedJsonTransport(
+            cache,
+            self.activity,
+            self._describe,
+            headers={"User-Agent": user_agent},
+            retries=retries,
+            timeout=timeout,
+        )
 
     def get(self, url: str) -> dict:
-        if url in self._cache:
-            return self._cache.get(url)
-        self.activity.record(self._describe(url))
-        data = self._fetch(url)
-        self._cache.put(url, data)
-        return data
+        return self._transport.get(url)
 
     def events_for_year(self, team_id: str, year: int) -> list[str]:
         url = (
@@ -65,26 +44,6 @@ class EspnApi:
             f"?dates={year}0101-{year}1231&limit=200"
         )
         return [item["$ref"] for item in self.get(url).get("items", [])]
-
-    def _fetch(self, url: str) -> dict:
-        request = urllib.request.Request(url, headers={"User-Agent": self._user_agent})
-        for attempt in range(self._retries):
-            try:
-                with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                    return json.load(response)
-            except urllib.error.HTTPError as e:
-                if 400 <= e.code < 500 and e.code != 429:
-                    raise
-                print(
-                    f"  [retry {attempt}] {self._describe(url)}: {e}", file=sys.stderr
-                )
-                time.sleep(2**attempt)
-            except (OSError, json.JSONDecodeError) as e:
-                print(
-                    f"  [retry {attempt}] {self._describe(url)}: {e}", file=sys.stderr
-                )
-                time.sleep(2**attempt)
-        raise RuntimeError(f"failed after {self._retries} attempts: {url}")
 
     def _describe(self, url: str) -> str:
         """Human-readable label for a CORE API url."""

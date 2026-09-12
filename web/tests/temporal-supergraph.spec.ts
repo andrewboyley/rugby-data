@@ -84,6 +84,29 @@ test("timeline controller seeks only TemporalIndex state after the supergraph is
   expect(kills).toBe(1);
 });
 
+test("timeline does not start a layout with no possible dynamics", () => {
+  let starts = 0;
+  let kills = 0;
+  const layout: TimelineLayout = {
+    identity: 73,
+    topologyReloads: 0,
+    start: () => { starts += 1; },
+    kill: () => { kills += 1; },
+  };
+  const singleNodeDataset = {
+    games: [{ eventId: 1, date: "2020-01-01T12:00:00Z", competitors: [{ teamId: 1, roster: [{ playerId: 1, jersey: 10 }] }] }],
+    players: { "1": "One" },
+    teams: {},
+  };
+
+  const controller = new TimelineController(singleNodeDataset, () => {}, () => {}, "max", () => layout);
+
+  expect(controller.activeNodeCount).toBe(1);
+  expect(starts).toBe(0);
+  controller.dispose();
+  expect(kills).toBe(1);
+});
+
 test("timeline seeks preserve private FA2 topology, worker, and player positions", () => {
   let layoutGraph: Graph | null = null;
   let layoutCreations = 0;

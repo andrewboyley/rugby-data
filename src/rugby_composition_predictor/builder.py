@@ -335,6 +335,8 @@ class DatasetBuilder:
                 if self._is_rims_staff(entry):
                     continue
                 player_id = str(entry.get("player", {}).get("id") or "")
+                if not player_id:
+                    continue
                 self._register_player_from_rims(player_id, entry)
                 roster.append(
                     RosterEntry(
@@ -443,7 +445,7 @@ class DatasetBuilder:
                 alternate_color = "#" + alternate_color.lstrip("#")
             else:
                 alternate_color = None
-            # Extract abbreviation from RIMS naming array (team detail) or meta (match summary)
+            # Extract abbreviation from RIMS naming array (team detail) or match meta.
             abbreviation = None
             naming = team_data.get("naming", [])
             if naming and isinstance(naming[0], dict):
@@ -451,7 +453,11 @@ class DatasetBuilder:
             if not abbreviation and isinstance(meta, dict):
                 abbreviation = meta.get("abbreviation")
             self._dataset.register_team(
-                team_id, name, color, alternate_color=alternate_color, abbreviation=abbreviation
+                team_id,
+                name,
+                color,
+                alternate_color=alternate_color,
+                abbreviation=abbreviation,
             )
         except Exception as exc:
             print(
@@ -705,7 +711,11 @@ class DatasetBuilder:
             # ESPN team may have abbreviation field
             abbreviation = team.get("abbreviation")
             self._dataset.register_team(
-                team_id, name, color, alternate_color=alternate_color, abbreviation=abbreviation
+                team_id,
+                name,
+                color,
+                alternate_color=alternate_color,
+                abbreviation=abbreviation,
             )
         except Exception as exc:
             print(
@@ -733,16 +743,10 @@ class DatasetBuilder:
                 espn_player_id = str(athlete.get("id") or "")
                 if not espn_player_id:
                     continue
-                name = (
-                    athlete.get("displayName")
-                    or athlete.get("fullName")
-                    or espn_player_id
-                )
-                # Canonicalise onto the RIMS/Opta player id via a shared display
-                # name when one already exists; otherwise keep the ESPN id.
-                player_id = self._dataset.player_id_by_name(name) or espn_player_id
-                if player_id == espn_player_id:
-                    self._register_player_from_site_web(espn_player_id, athlete)
+                # ESPN and RIMS identifiers are not crosswalked. Matching their
+                # display names would merge different people with the same name.
+                player_id = espn_player_id
+                self._register_player_from_site_web(espn_player_id, athlete)
                 roster.append(
                     RosterEntry(
                         player_id=player_id,

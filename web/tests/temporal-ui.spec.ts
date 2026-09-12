@@ -21,8 +21,10 @@ const productionUiFixture = {
 
 async function openFixture(page: import("@playwright/test").Page) {
   await page.route("**/data/dataset.json", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(fixture) }));
-  await page.goto("/");
-  await page.getByRole("button", { name: "Timeline", exact: true }).click();
+  await page.goto("/#dataset=/data/dataset.json");
+  const timeline = page.getByRole("button", { name: "Timeline", exact: true });
+  await expect(timeline).toBeEnabled({ timeout: 30_000 });
+  await timeline.click();
   await expect(page.getByTestId("timeline-panel")).toBeVisible();
 }
 
@@ -31,14 +33,17 @@ test("main page fetches dataset only and timeline controls seek and play", async
   const errors: string[] = [];
   page.on("request", (request) => requests.push(request.url()));
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/");
+  await page.route("**/data/dataset.json", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(fixture) }));
+  await page.goto("/#dataset=/data/dataset.json");
   await page.waitForTimeout(1_000);
   expect(errors).toEqual([]);
   expect(await page.locator("body").innerText()).toContain("Rugby co-occurrence graph");
   await expect(page.getByTestId("main-graph")).toBeVisible({ timeout: 30_000 });
   expect(requests.some((url) => url.endsWith("/data/dataset.json"))).toBe(true);
   expect(requests.some((url) => url.endsWith("/data/graph.json"))).toBe(false);
-  await page.getByRole("button", { name: "Timeline", exact: true }).click();
+  const timeline = page.getByRole("button", { name: "Timeline", exact: true });
+  await expect(timeline).toBeEnabled({ timeout: 30_000 });
+  await timeline.click();
   await expect(page.getByTestId("timeline-panel")).toBeVisible();
   await page.getByLabel("Minimum shared matches").fill("2");
   await expect(page.getByLabel("Minimum shared matches")).toHaveValue("2");
@@ -47,16 +52,18 @@ test("main page fetches dataset only and timeline controls seek and play", async
   await expect(page.getByRole("button", { name: "Play" })).toBeVisible();
   await page.getByRole("button", { name: "Play" }).click();
   await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
-  await page.getByRole("button", { name: "Fit graph" }).click();
+  await page.getByRole("button", { name: "Home" }).click();
   await page.getByLabel("Trails").check();
   await expect(page.getByTestId("main-graph")).toHaveAttribute("data-trails-enabled", "true");
 });
 
 test("Given production-shaped data is routed, When the timeline opens, Then player and match DOM stay bounded", async ({ page }) => {
   await page.route("**/data/dataset.json", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(productionUiFixture) }));
-  await page.goto("/");
+  await page.goto("/#dataset=/data/dataset.json");
   await expect(page.getByTestId("main-graph")).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: "Timeline", exact: true }).click();
+  const timeline = page.getByRole("button", { name: "Timeline", exact: true });
+  await expect(timeline).toBeEnabled({ timeout: 30_000 });
+  await timeline.click();
   await expect(page.getByTestId("timeline-panel")).toBeVisible();
 
   expect(await page.locator("option").count()).toBeLessThan(200);
@@ -106,6 +113,7 @@ test("timeline range handles use available-date steps and keyboard playback cont
   await end.press("Home");
   await expect(page.getByRole("status")).toContainText("2020-01-01");
   await end.press("End");
+  await page.getByRole("slider", { name: "Timeline date" }).press("Home");
   await end.press("Space");
   await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
   await page.keyboard.press("Escape");
@@ -118,6 +126,7 @@ test("playback stops at the selected end date and filter changes pause it", asyn
   await page.getByLabel("Timeline speed").selectOption("4");
   await end.press("End");
   await end.press("ArrowLeft");
+  await page.getByRole("slider", { name: "Timeline date" }).press("Home");
   await end.press("Space");
   await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
   await expect(page.getByTestId("timeline-label")).toHaveText("2020-01-03", { timeout: 2_000 });
@@ -136,8 +145,6 @@ test("timeline scrub is reversible, playback speed advances, pause freezes, and 
   await openFixture(page);
   const graph = page.getByTestId("main-graph");
   const slider = page.getByRole("slider", { name: "Timeline date" });
-   await expect(graph).toHaveAttribute("data-node-count", "4");
-  await slider.press("End");
   await expect(graph).toHaveAttribute("data-node-count", "4");
   await expect(graph).toHaveAttribute("data-edge-count", "4");
   await expect(page.getByTestId("timeline-label")).toHaveText("2020-01-10");
@@ -160,13 +167,12 @@ test("timeline scrub is reversible, playback speed advances, pause freezes, and 
 test("initial position UI supports empty dateMin and full dateMax", async ({ page }) => {
   await openFixture(page);
   const graph = page.getByTestId("main-graph");
-    await expect(graph).toHaveAttribute("data-node-count", "4");
-  const worker = await graph.getAttribute("data-layout-worker-id");
-  await page.getByLabel("Initial timeline position").selectOption("max");
   await expect(graph).toHaveAttribute("data-edge-count", "4");
-  await expect(page.getByTestId("timeline-label")).toHaveText("2020-01-10");
+  const worker = await graph.getAttribute("data-layout-worker-id");
   await page.getByLabel("Initial timeline position").selectOption("min");
-    await expect(graph).toHaveAttribute("data-node-count", "0");
+  await expect(graph).toHaveAttribute("data-node-count", "0");
+  await page.getByLabel("Initial timeline position").selectOption("max");
+  await expect(page.getByTestId("timeline-label")).toHaveText("2020-01-10");
   await expect(graph).toHaveAttribute("data-layout-worker-id", worker!);
 });
 
@@ -174,6 +180,7 @@ test("match and partner overlays keep legacy interaction semantics without rebui
   await openFixture(page);
   const graph = page.getByTestId("main-graph");
   await page.getByRole("slider", { name: "Timeline date" }).press("End");
+  await expect(graph).toHaveAttribute("data-edge-count", "4");
   const before = await graph.getAttribute("data-edge-count");
   await page.getByLabel("Selected player").selectOption("1");
   await expect(page.getByTestId("partner-overlay")).toContainText("Partners for 1");

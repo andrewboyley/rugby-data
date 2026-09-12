@@ -4,12 +4,21 @@
   let { dataset, controller, time, startIndex = $bindable(0), endIndex = $bindable(0), speed = $bindable(1), playing, selectedId = $bindable<string | null>(null), teamId = $bindable<number | null>(null), minMatchCount = $bindable(1), edgeColorMode = $bindable<"shared" | "winRate" | "recency">("shared"), activeMatchId = $bindable<number | null>(null), onToggle = () => {}, onSeek = () => {}, onPause = () => {}, onSelectPlayer = () => {}, onSelectMatch = () => {} }: { dataset: DatasetLike; controller: TimelineController; time: number; startIndex: number; endIndex: number; speed: number; playing: boolean; selectedId: string | null; teamId: number | null; minMatchCount: number; edgeColorMode: "shared" | "winRate" | "recency"; activeMatchId: number | null; onToggle?: () => void; onSeek?: (index: number) => void; onPause?: () => void; onSelectPlayer?: (id: string) => void; onSelectMatch?: (id: number) => void } = $props();
   const dates = $derived(controller.timeline.dates);
   const currentIndex = $derived(Math.max(0, dates.indexOf(time)));
-  const formatDate = (value: number | undefined) => value == null ? "—" : new Date(value).toISOString().slice(0, 10);
+  const formatDate = (value: number | undefined) => value == null || !Number.isFinite(value) ? "—" : new Date(value).toISOString().slice(0, 10);
   function handleTimelineKey(event: KeyboardEvent): void {
     if (event.key === " " || event.code === "Space") { event.preventDefault(); onToggle(); }
     if (event.key === "Escape") { event.preventDefault(); onPause(); }
   }
-  const histogram = $derived.by(() => { const bins = Math.min(64, Math.max(1, dates.length)); return Array.from({ length: bins }, (_, index) => { const from = Math.floor(index * dates.length / bins); const to = Math.max(from + 1, Math.floor((index + 1) * dates.length / bins)); return { index, count: (controller.timeline.matches as readonly { timestamp: number }[]).filter((match) => { const dateIndex = dates.indexOf(match.timestamp); return dateIndex >= from && dateIndex < to; }).length }; }); });
+  const histogram = $derived.by(() => {
+    const bins = Math.min(64, Math.max(1, dates.length));
+    const dateIndices = new Map(dates.map((date, index) => [date, index]));
+    const counts = Array<number>(bins).fill(0);
+    for (const match of controller.timeline.matches as readonly { timestamp: number }[]) {
+      const dateIndex = dateIndices.get(match.timestamp);
+      if (dateIndex !== undefined) counts[Math.floor(dateIndex * bins / dates.length)] += 1;
+    }
+    return counts.map((count, index) => ({ index, count }));
+  });
 </script>
 <section class="absolute inset-x-4 bottom-20 z-10 max-h-[calc(100vh-10rem)] overflow-y-auto rounded-box bg-base-100 p-4 shadow-lg" data-testid="timeline-panel" aria-label="Timeline panel">
   <div class="mb-2 flex h-12 items-end gap-px" aria-label="Match histogram">{#each histogram as bin}<button class="min-w-0 flex-1 bg-primary/70" style={`height:${Math.max(8, bin.count * 4)}px`} aria-label={`${bin.count} matches`} onclick={() => onSeek(Math.min(dates.length - 1, Math.floor(bin.index * dates.length / histogram.length)))}></button>{/each}</div>

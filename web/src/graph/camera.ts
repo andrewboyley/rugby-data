@@ -31,6 +31,15 @@ export function fitToNodes(
   }
   const groupWidth = groupMaxX - groupMinX || 1;
   const groupHeight = groupMaxY - groupMinY || 1;
+  if (nodeKeys.length === 1) {
+    // A point has no bounding box for Sigma's generic fitter to scale. Frame it
+    // at a readable 10px radius while respecting the camera's minimum ratio.
+    const ratio = Math.max(0.01, Math.min(10, (maxSize / 10) ** 2));
+    const final = { ...state, ratio };
+    if (opts.animate) sigma.getCamera().animate(final);
+    else sigma.getCamera().setState(final);
+    return;
+  }
   const widthLimiting = groupHeight / groupWidth < height / width;
   const limitDim = widthLimiting ? width : height;
   const radiusPx = (ratio: number) => maxSize / Math.sqrt(ratio);

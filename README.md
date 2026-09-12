@@ -1,7 +1,7 @@
 # Rugby Composition Predictor
 
-Builds a dataset of international rugby union matches from the ESPN CORE API
-and visualises its temporal co-occurrence graph in the browser.
+Builds a dataset of international rugby union matches from World Rugby RIMS and
+ESPN, then visualises its temporal co-occurrence graph in the browser.
 
 The dataset covers all international (national) teams. Match discovery
 iterates each team's events per year, so any competition a national team enters
@@ -59,8 +59,8 @@ just dev-status      # show status / logs
 just dev-stop        # stop it
 ```
 
-The viewer reads `data/dataset.json` from the repository root and derives the
-reversible temporal graph in the browser.
+The viewer fetches `/data/dataset.json` and derives the reversible temporal
+graph in the browser.
 
 ## Visualisation
 
@@ -71,16 +71,13 @@ Nodes are players (size = appearances, colour = modal jersey number), edges
 connect players who shared a match (width/opacity = co-occurrence count).
 Rendering and interaction use [sigma.js](https://www.sigmajs.org) on a
 [graphology](https://graphology.github.io) graph, with the
-ForceAtlas2 layout (`graphology-layout-forceatlas2`) running in a web worker
+ForceAtlas2 layout (`graphology-layout-forceatlas2`) running in one persistent
+web worker. Sigma renders temporal node and edge reducers directly from the
+dataset; the retired static `graph.json` renderer has been removed.
 
-The temporal viewer is the only application path. It loads `dataset.json`
-directly; the retired static `graph.json` renderer has been removed.
-with stock settings. Filter by min shared matches, max degree, team or date
-window; click a node to focus its teammates; use the search box to jump to a
-player, or the Recenter button to zoom the view to the currently filtered
-players. Team cluster labels and the jersey
-colour ramp are the only custom pieces; everything else uses stock sigma
-defaults.
+Use Timeline to move through match dates, Home to restore the camera, and Grid
+to show reference coordinates. Filter by shared matches, team, date, or player;
+click a node to focus its teammates; use search to jump to a player or match.
 
 ## Layout
 

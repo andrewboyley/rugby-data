@@ -1,5 +1,8 @@
 import type Graph from "graphology";
-import { PersistentForceAtlas2 } from "./graph/PersistentForceAtlas2";
+import {
+  PersistentForceAtlas2,
+  type PositionSnapshot,
+} from "./graph/PersistentForceAtlas2";
 import type { RenderScheduler } from "./graph/RenderScheduler";
 import {
   createAllTimeLayoutTopology,
@@ -14,6 +17,7 @@ export type TimelineLayout = Readonly<{
   topologyReloads: number;
   start: () => void;
   kill: () => void;
+  subscribe?: (listener: (snapshot: PositionSnapshot) => void) => () => void;
 }>;
 
 export class TimelineController {
@@ -38,7 +42,9 @@ export class TimelineController {
       createAllTimeLayoutTopology(dataset, this.temporalIndex).graph,
     );
     this.applySeek(initialPosition === "max" ? this.timeline.dateMax ?? Number.NEGATIVE_INFINITY : Number.NEGATIVE_INFINITY);
-    this.layout.start();
+    // ForceAtlas2 cannot move a zero- or one-node graph. Avoid starting its
+    // worker, which would otherwise continuously publish identical positions.
+    if (this.graph.order > 1) this.layout.start();
   }
 
   get currentTime(): number { return this.temporalIndex.currentTime; }
@@ -93,7 +99,8 @@ export class TimelineController {
     const max = this.playbackEnd;
     if (max == null) return this.pause();
     const current = this.currentTime === Number.NEGATIVE_INFINITY ? this.timeline.dateMin ?? max : this.currentTime;
-    const target = Math.min(max, current + (now - this.lastFrame) * 86_400 * this.speed);
+    // A speed of 1 advances one calendar day in 400 ms.
+    const target = Math.min(max, current + (now - this.lastFrame) * 216_000 * this.speed);
     this.lastFrame = now;
     this.seek(target);
     if (target >= max) this.pause(); else this.frame = requestAnimationFrame((time) => this.tick(time));

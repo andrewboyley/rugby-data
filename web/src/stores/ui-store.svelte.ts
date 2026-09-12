@@ -28,6 +28,11 @@ export interface UIState {
   storageKey: string;
 }
 
+export type GraphGenerationSettings = Pick<
+  UIState,
+  "nodeCount" | "clusterCount" | "degreeRatio" | "edgeWeight" | "fixedSeed" | "onlyWithinCluster"
+>;
+
 const initialState: UIState = {
   settingsTab: "fa2",
   bottomTab: "live",
@@ -106,6 +111,16 @@ export function setFixedSeed(value: number) {
 
 export function setOnlyWithinCluster(value: boolean) {
   uiState.onlyWithinCluster = value;
+}
+
+/** Apply a completed graph-control edit as one reactive update. */
+export function setGraphGenerationSettings(settings: GraphGenerationSettings) {
+  uiState.nodeCount = settings.nodeCount;
+  uiState.clusterCount = settings.clusterCount;
+  uiState.degreeRatio = settings.degreeRatio;
+  uiState.edgeWeight = settings.edgeWeight;
+  uiState.fixedSeed = settings.fixedSeed;
+  uiState.onlyWithinCluster = settings.onlyWithinCluster;
 }
 
 export function setAutoFit(value: boolean) {

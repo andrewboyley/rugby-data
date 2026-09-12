@@ -19,25 +19,54 @@ async function testBenchState(page: import("@playwright/test").Page): Promise<Te
 
 async function openTemporal(page: import("@playwright/test").Page) {
   await page.route("**/data/dataset.json", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(fixture) }));
-  await page.goto("/");
+  await page.goto("/#dataset=/data/dataset.json");
   await expect(page.getByTestId("main-graph")).toBeVisible();
-  await page.getByRole("button", { name: "Timeline", exact: true }).click();
+  const timeline = page.getByRole("button", { name: "Timeline", exact: true });
+  await expect(timeline).toBeEnabled({ timeout: 30_000 });
+  await timeline.click();
   await expect(page.getByTestId("timeline-panel")).toBeVisible();
 }
 
 test.describe("End-user acceptance: temporal viewer", () => {
-  test("a visitor sees a usable graph without a legacy graph request or page errors", async ({ page }) => {
+  test("a visitor loads the bundled one-player synthetic dataset", async ({ page }) => {
     const errors: string[] = [];
     const requests: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("request", (request) => requests.push(request.url()));
-    await page.route("**/data/dataset.json", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(fixture) }));
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Rugby co-occurrence graph" })).toBeVisible();
     await expect(page.getByTestId("main-graph")).toBeVisible();
     await expect(page.locator('[data-testid="main-graph"] canvas').first()).toBeVisible();
+    await expect(page.getByTestId("main-graph")).toHaveAttribute("data-node-count", "1");
+    await expect.poll(async () => {
+      const state = await page.getByTestId("main-graph").getAttribute("data-camera-state");
+      return state ? Number(JSON.parse(state).ratio) : Infinity;
+    }).toBeLessThan(0.02);
+    const timeline = page.getByRole("button", { name: "Timeline", exact: true });
+    await expect(timeline).toBeEnabled();
+    await timeline.click();
+    await page.getByRole("button", { name: "Match 1" }).click();
+    await expect(page.getByTestId("main-graph")).toHaveAttribute("data-node-count", "1");
+    expect(requests.some((url) => url.endsWith("/synthetic.json"))).toBe(true);
+    expect(requests.some((url) => url.endsWith("/data/dataset.json"))).toBe(false);
     expect(requests.some((url) => url.endsWith("/data/graph.json"))).toBe(false);
     expect(errors).toEqual([]);
+  });
+
+  test("a visitor sees a loading state before the dataset response arrives", async ({ page }) => {
+    let releaseResponse: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      void page.route("**/data/dataset.json", async (route) => {
+        resolve();
+        await new Promise<void>((release) => { releaseResponse = release; });
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify(fixture) });
+      });
+    });
+    await page.goto("/#dataset=/data/dataset.json", { waitUntil: "commit" });
+    await requestStarted;
+    await expect(page.getByTestId("dataset-loading")).toBeVisible();
+    await expect(page.getByTestId("main-graph")).toBeVisible();
+    releaseResponse!();
   });
 
   test("a visitor can open and close the timeline without losing the graph", async ({ page }) => {
@@ -50,19 +79,19 @@ test.describe("End-user acceptance: temporal viewer", () => {
     await expect(page.getByTestId("main-graph")).toBeVisible();
   });
 
-  test("a visitor can move from the first date to the last date and back", async ({ page }) => {
+  test("a visitor can move from the last date to the first date and back", async ({ page }) => {
     await openTemporal(page);
     const graph = page.getByTestId("main-graph");
     const slider = page.getByRole("slider", { name: "Timeline date" });
-     await expect(graph).toHaveAttribute("data-node-count", "6");
-    await slider.press("End");
     await expect(graph).toHaveAttribute("data-node-count", "6");
     await expect(graph).toHaveAttribute("data-edge-count", "7");
     await expect(page.getByTestId("timeline-label")).toHaveText("2020-01-07");
     await slider.press("Home");
-     await expect(graph).toHaveAttribute("data-node-count", "4");
+    await expect(graph).toHaveAttribute("data-node-count", "4");
     await expect(graph).toHaveAttribute("data-edge-count", "2");
     await expect(page.getByTestId("timeline-label")).toHaveText("2020-01-01");
+    await slider.press("End");
+    await expect(graph).toHaveAttribute("data-node-count", "6");
   });
 
   test("a visitor can choose a full initial timeline and return to an empty one", async ({ page }) => {
@@ -95,8 +124,29 @@ test.describe("End-user acceptance: temporal viewer", () => {
     await expect(graph).toHaveAttribute("data-trails-enabled", "true");
     await page.getByRole("checkbox", { name: "Auto-fit" }).uncheck();
     await expect(page.getByRole("checkbox", { name: "Auto-fit" })).not.toBeChecked();
-    await page.getByRole("button", { name: "Fit graph" }).click();
-    await expect(page.getByRole("checkbox", { name: "Auto-fit" })).toBeChecked();
+    await page.getByRole("button", { name: "Home" }).click();
+    await expect(page.getByRole("checkbox", { name: "Auto-fit" })).not.toBeChecked();
+  });
+
+  test("enabling auto-fit animates the camera to the fitted graph", async ({ page }) => {
+    await openTemporal(page);
+    const graph = page.getByTestId("main-graph");
+    const autoFit = page.getByRole("checkbox", { name: "Auto-fit" });
+    const box = await graph.boundingBox();
+    expect(box).not.toBeNull();
+    await autoFit.uncheck();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.wheel(0, -500);
+    const beforeFit = await graph.getAttribute("data-camera-state");
+
+    await autoFit.check();
+    await page.waitForTimeout(75);
+    const duringFit = await graph.getAttribute("data-camera-state");
+    await page.waitForTimeout(300);
+    const afterFit = await graph.getAttribute("data-camera-state");
+
+    expect(duringFit).not.toBe(beforeFit);
+    expect(duringFit).not.toBe(afterFit);
   });
 
   test("a visitor can filter by team and minimum matches, then focus a player neighborhood", async ({ page }) => {
@@ -115,10 +165,10 @@ test.describe("End-user acceptance: temporal viewer", () => {
     await page.setViewportSize({ width: 480, height: 640 });
     await openTemporal(page);
     await expect(page.getByRole("button", { name: "Timeline", exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Fit graph" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Home" })).toBeVisible();
     await expect(page.getByTestId("main-graph")).toBeVisible();
     const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
-    for (const locator of [page.getByRole("button", { name: "Timeline", exact: true }), page.getByRole("button", { name: "Fit graph" }), page.getByTestId("timeline-panel")]) {
+    for (const locator of [page.getByRole("button", { name: "Timeline", exact: true }), page.getByRole("button", { name: "Home" }), page.getByTestId("timeline-panel")]) {
       const box = await locator.boundingBox();
       expect(box).not.toBeNull();
       expect(box!.x).toBeGreaterThanOrEqual(0);
@@ -133,9 +183,9 @@ test.describe("End-user acceptance: temporal viewer", () => {
 
   test("a visitor gets a clear recovery message when the dataset cannot be loaded", async ({ page }) => {
     await page.route("**/data/dataset.json", (route) => route.fulfill({ status: 503, body: "unavailable" }));
-    await page.goto("/");
+    await page.goto("/#dataset=/data/dataset.json");
     await expect(page.getByText("Could not load temporal dataset:")).toBeVisible();
-    await expect(page.getByTestId("main-graph")).toHaveCount(0);
+    await expect(page.getByTestId("main-graph")).toBeVisible();
   });
 });
 
@@ -262,8 +312,8 @@ test.describe("End-user acceptance: ForceAtlas2 test bench", () => {
     await page.reload();
     await expect(page.getByTestId("manual-iterations-per-tick")).toHaveValue("3");
     await page.evaluate(() => {
-      const settings = JSON.parse(localStorage.getItem("rugby-graph-settings") ?? "{}");
-      localStorage.setItem("rugby-graph-settings", JSON.stringify({ ...settings, manualIterationsPerTick: 7 }));
+      const settings = JSON.parse(localStorage.getItem("rugby-fa2-settings") ?? "{}");
+      localStorage.setItem("rugby-fa2-settings", JSON.stringify({ ...settings, manualIterationsPerTick: 7 }));
     });
     await page.reload();
     await expect(page.getByTestId("manual-iterations-per-tick")).toHaveValue("3");
