@@ -1,5 +1,6 @@
 """Application-wide configuration and constants."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -12,7 +13,7 @@ CORE_API_BASE = "https://sports.core.api.espn.com/v2/sports/rugby"
 # CORE API above, its event `summary` response carries rugby rosters inline.
 SITE_WEB_API_BASE = "https://site.web.api.espn.com/apis/site/v2/sports/rugby"
 SOUTH_AFRICA_TEAM_ID = "5"
-YEARS = range(2016, 2027)
+YEARS = range(2016, datetime.now(UTC).year + 1)
 
 # International (national) rugby union teams. Seeded from the Rugby World Cup
 # participants across recent editions; match discovery iterates these teams so

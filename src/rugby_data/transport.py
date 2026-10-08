@@ -77,8 +77,6 @@ class CachedJsonTransport:
                 self._retry(url, error, attempt)
         raise RuntimeError(f"failed after {self._retries} attempts: {url}")
 
-    def _retry(
-        self, url: str, error: Exception, attempt: int
-    ) -> None:
+    def _retry(self, url: str, error: Exception, attempt: int) -> None:
         print(f"  [retry {attempt}] {self._describe(url)}: {error}", file=sys.stderr)
         time.sleep(self._retry_delay(error, attempt))

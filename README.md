@@ -22,8 +22,40 @@ just dataset
 ```
 
 Use `--team <id>` for one team. Builds resume from `data/api_cache.json`.
-`--reset` rebuilds from cached responses without downloading again. Do not commit
-the generated dataset or API cache.
+`--reset` rebuilds from cached responses without downloading again. Use
+`--refresh` to clear the cache and processed markers, then fetch upstream again:
+
+```sh
+just dataset -- --refresh
+```
+
+`--reset` and `--refresh` cannot be combined. Do not commit the generated dataset
+or API cache.
+
+## Serve the dataset
+
+```sh
+just serve
+```
+
+The optional server binds to `127.0.0.1:8000` and only serves the existing local
+artifact; it never rebuilds or calls upstream APIs. Build or refresh in a separate
+command. Atomic dataset writes are detected on the next request without restarting
+server.
+
+| Endpoint | Response |
+| --- | --- |
+| `GET /dataset` | Exact schema-versioned `dataset.json` contract |
+| `GET /health` | Status plus artifact schema version and generation time |
+| `GET /games/<eventId>` | Contract game fragment |
+| `GET /teams/<teamId>` | Team registry fragment |
+| `GET /players/<playerId>` | Player registry fragment |
+| `GET /venues/<venueId>` | Venue registry fragment |
+| `GET /leagues/<leagueId>` | League registry fragment |
+| `GET /coaches/<coachId>` | Coach registry fragment |
+
+Responses are JSON. Unknown paths return `404`; non-GET requests return `405`.
+`/dataset` supports ETag revalidation.
 
 ## Contract
 

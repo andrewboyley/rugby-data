@@ -99,6 +99,14 @@ class ApiCache:
                 del self._entries[key]
         self.save()
 
+    def clear(self) -> None:
+        """Discard raw responses and processed markers for a fresh upstream run."""
+        with self._lock:
+            self._entries = {}
+            self._processed = set()
+            self._pending_writes = self._soft_write_limit
+        self.save()
+
     # ---- persistence ----
 
     def save(self, force: bool = False) -> None:
@@ -108,6 +116,7 @@ class ApiCache:
                 return
             payload = dict(self._entries)
             payload[CACHE_PROCESSED_KEY] = sorted(self._processed)
+            self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(self._path.suffix + ".tmp")
             with open(tmp, "w") as f:
                 json.dump(payload, f)

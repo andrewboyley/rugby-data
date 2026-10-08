@@ -46,8 +46,7 @@ def main() -> int:
     # ---- RIMS ----
     print("\n[RIMS] venue / league / coach extraction")
     rims_keys = [
-        k for k in cache_keys
-        if "rugby/v3/match/" in k and k.endswith("/summary")
+        k for k in cache_keys if "rugby/v3/match/" in k and k.endswith("/summary")
     ]
     if not rims_keys:
         check(False, "found a cached RIMS match summary")
@@ -97,8 +96,7 @@ def main() -> int:
     # ---- ESPN site web ----
     print("\n[ESPN] venue / league registration")
     espn_keys = [
-        k for k in cache_keys
-        if "site.web.api.espn.com" in k and "/summary" in k
+        k for k in cache_keys if "site.web.api.espn.com" in k and "/summary" in k
     ]
     if not espn_keys:
         check(False, "found a cached ESPN site web summary")

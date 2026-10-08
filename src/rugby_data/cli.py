@@ -16,6 +16,7 @@ from .config import (
 from .dataset import Dataset
 from .reporting import RichProgressBar
 from .rims_api import RimsApi
+from .server import DatasetServer
 
 
 def build_dataset(
@@ -25,9 +26,14 @@ def build_dataset(
     source: str = "rims-first",
     reset: bool = False,
     skip_failed: bool = False,
+    refresh: bool = False,
 ) -> None:
     cache = ApiCache(cache_path)
-    if reset:
+    if refresh:
+        cache.clear()
+        dataset = Dataset()
+        print("== Refresh: cleared local cache and rebuilding from upstream ==")
+    elif reset:
         # Forget which events were already processed AND start from an empty
         # dataset, so every discovered event is re-derived from the cached raw
         # responses. This discards any stale data from a previous schema (e.g.
@@ -111,8 +117,24 @@ def main(argv=None) -> None:
         help="skip matches previously recorded as permanently unresolvable "
         "(RIMS has no roster and no usable ESPN fallback)",
     )
+    dataset_cmd.add_argument(
+        "--refresh",
+        action="store_true",
+        help="clear local cache and processed markers, then fetch upstream again",
+    )
+
+    serve_cmd = sub.add_parser("serve", help="serve dataset.json over HTTP")
+    serve_cmd.add_argument(
+        "--dataset",
+        default=DEFAULT_DATASET_PATH,
+        help="dataset path (default: %(default)s)",
+    )
+    serve_cmd.add_argument("--host", default="127.0.0.1", help="bind host")
+    serve_cmd.add_argument("--port", default=8000, type=int, help="bind port")
 
     args = parser.parse_args(argv)
+    if args.command == "dataset" and args.reset and args.refresh:
+        parser.error("--reset and --refresh cannot be used together")
 
     if args.command == "dataset":
         team_ids = [args.team] if args.team else None
@@ -123,4 +145,15 @@ def main(argv=None) -> None:
             source=args.source,
             reset=args.reset,
             skip_failed=args.skip_failed,
+            refresh=args.refresh,
         )
+    elif args.command == "serve":
+        server = DatasetServer((args.host, args.port), Path(args.dataset))
+        host, port = server.server_address[:2]
+        print(f"Serving dataset at http://{host}:{port}/dataset")
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()

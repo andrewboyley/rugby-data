@@ -30,6 +30,18 @@ class AuditRemediesTests(unittest.TestCase):
             self.assertEqual(ApiCache(path).get("one"), {"value": 1})
             self.assertEqual(ApiCache(path).get("two"), {"value": 2})
 
+    def test_clear_discards_cache_entries_and_processed_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cache.json"
+            cache = ApiCache(path)
+            cache.put("url", {"value": 1})
+            cache.mark_processed("event")
+            cache.clear()
+
+            reloaded = ApiCache(path)
+            self.assertNotIn("url", reloaded)
+            self.assertFalse(reloaded.is_processed("event"))
+
     def test_roster_entries_without_ids_are_discarded_and_incomplete(self) -> None:
         competitor = competitor_from_dict(
             {

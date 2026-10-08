@@ -25,8 +25,8 @@ just lint
 registries. Event, player, coach, venue, and league identifiers remain source
 strings; team IDs are numeric. Keep only complete games.
 
-A future API must serve this contract rather than creating a second graph
-export.
+The optional API must serve this contract rather than creating a second graph
+export. It is read-only and must not expose the API cache or trigger upstream fetches.
 
 ## Rules
 

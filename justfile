@@ -16,14 +16,18 @@ dataset *args:
 # Rebuild from cached API responses.
 alias build := dataset
 
+# Serve the local versioned dataset over HTTP.
+serve *args:
+    {{ venv }}/rugby-data serve {{ args }}
+
 # Verify Python types and bytecode.
 check:
     {{ venv }}/ty check src
     {{ venv }}/python -m compileall -q src
 
-# Run deterministic dataset-contract tests.
+# Run deterministic tests (excludes local-cache diagnostic test_fetch_entities.py).
 test:
-    {{ venv }}/python tests/test_dataset_contract.py
+    {{ venv }}/python -m unittest discover -s tests -p 'test_*.py'
 
 # Lint Python source and tests.
 lint:

@@ -91,12 +91,12 @@ class DatasetBuilder:
         ]
         if skip_failed:
             skipped = [
-                u for u in pending
-                if self._is_terminal_fail(event_id_from_url(u))
+                u for u in pending if self._is_terminal_fail(event_id_from_url(u))
             ]
             if skipped:
                 pending = [
-                    u for u in pending
+                    u
+                    for u in pending
                     if not self._is_terminal_fail(event_id_from_url(u))
                 ]
                 print(
@@ -141,6 +141,7 @@ class DatasetBuilder:
         elapsed = time.time() - t0
         self._print_summary(len(pending), elapsed)
         self._print_failures(results)
+
     def _discover_event_urls(self) -> list[str]:
         urls: set[str] = set()
         if self._source in ("rims-first", "rims"):
@@ -230,9 +231,7 @@ class DatasetBuilder:
                 file=sys.stderr,
             )
             espn_url = (
-                self._get_espn_fallback_url(match_id)
-                if match_id is not None
-                else None
+                self._get_espn_fallback_url(match_id) if match_id is not None else None
             )
             if not espn_url:
                 error = (
@@ -241,16 +240,23 @@ class DatasetBuilder:
                     else f"RIMS error ({rims_error}); no ESPN match found"
                 )
                 self._record_terminal_fail(match_id, error)
-                return FetchResult(None, error, match_id, source="rims→espn",
-                                   fell_back=True, partial=rims_game)
+                return FetchResult(
+                    None,
+                    error,
+                    match_id,
+                    source="rims→espn",
+                    fell_back=True,
+                    partial=rims_game,
+                )
             # ESPN tier: the site web API is a complete source (teams, scores,
             # and rugby rosters). The CORE API is used only for event discovery;
             # its own game responses carry no rugby rosters, so it cannot
             # complete a game and is not used as a data source.
             game = self._fetch_game_espn_site_web(espn_url)
             if game and game.is_complete():
-                return FetchResult(game, None, match_id, source="rims→espn",
-                                   fell_back=True)
+                return FetchResult(
+                    game, None, match_id, source="rims→espn", fell_back=True
+                )
             path = self._espn_event_path(espn_url)
             if path is not None:
                 self._record_neg_lineup(path[1], "ESPN site web incomplete")
@@ -258,14 +264,23 @@ class DatasetBuilder:
                 match_id, "RIMS incomplete; ESPN site web incomplete"
             )
             return FetchResult(
-                None, f"RIMS {rims_status}; ESPN site web incomplete", match_id,
-                source="rims→espn", fell_back=True,
+                None,
+                f"RIMS {rims_status}; ESPN site web incomplete",
+                match_id,
+                source="rims→espn",
+                fell_back=True,
                 partial=game if game is not None else rims_game,
             )
         except Exception as exc:
-            return FetchResult(None, f"unexpected: {exc}", match_id,
-                               source="rims→espn", fell_back=True,
-                               partial=rims_game)
+            return FetchResult(
+                None,
+                f"unexpected: {exc}",
+                match_id,
+                source="rims→espn",
+                fell_back=True,
+                partial=rims_game,
+            )
+
     def _fetch_rims(self, match_id: str) -> dict:
         try:
             return self._rims_api.match_summary(match_id)
@@ -400,9 +415,7 @@ class DatasetBuilder:
                 coach_id = str(player.get("id") or "")
                 if not coach_id:
                     continue
-                name = (
-                    (player.get("name") or {}).get("display") or coach_id
-                )
+                name = (player.get("name") or {}).get("display") or coach_id
                 self._dataset.register_coach(coach_id, name)
                 return coach_id
             except Exception as exc:
@@ -438,9 +451,8 @@ class DatasetBuilder:
             else:
                 color = None
             alternate_color = (
-                (SECONDARY_KIT_COLOURS.get(espn_team_id) if espn_team_id else None)
-                or team_data.get("alternateColour")
-            )
+                SECONDARY_KIT_COLOURS.get(espn_team_id) if espn_team_id else None
+            ) or team_data.get("alternateColour")
             if alternate_color and isinstance(alternate_color, str):
                 alternate_color = "#" + alternate_color.lstrip("#")
             else:
@@ -627,9 +639,7 @@ class DatasetBuilder:
                 league_id=league_id,
             )
         except Exception as exc:
-            print(
-                f"[WARN] ESPN site web game parse failed: {exc}", file=sys.stderr
-            )
+            print(f"[WARN] ESPN site web game parse failed: {exc}", file=sys.stderr)
             return None
 
     def _register_venue_from_site_web(self, summary: dict) -> str | None:
@@ -701,8 +711,8 @@ class DatasetBuilder:
                 color = "#" + color.lstrip("#")
             else:
                 color = None
-            alternate_color = (
-                SECONDARY_KIT_COLOURS.get(colour_key) or team.get("alternateColor")
+            alternate_color = SECONDARY_KIT_COLOURS.get(colour_key) or team.get(
+                "alternateColor"
             )
             if alternate_color and isinstance(alternate_color, str):
                 alternate_color = "#" + alternate_color.lstrip("#")
@@ -755,7 +765,8 @@ class DatasetBuilder:
                 )
             except Exception as exc:
                 print(
-                    f"[WARN] site web roster entry skipped: {exc}", file=sys.stderr,
+                    f"[WARN] site web roster entry skipped: {exc}",
+                    file=sys.stderr,
                 )
         return roster
 
@@ -764,9 +775,7 @@ class DatasetBuilder:
             return
         try:
             name = (
-                athlete.get("displayName")
-                or athlete.get("fullName")
-                or str(player_id)
+                athlete.get("displayName") or athlete.get("fullName") or str(player_id)
             )
             self._dataset.register_player(player_id, name)
         except Exception as exc:
@@ -800,16 +809,12 @@ class DatasetBuilder:
             label = self._match_label(result.partial)
             activity = result.error or "unknown error"
             complete = False
-            print(
-                f"  [failed] {result.match_id}: {activity}", file=sys.stderr
-            )
+            print(f"  [failed] {result.match_id}: {activity}", file=sys.stderr)
         else:
             label = f"match {result.match_id or '?'}"
             activity = result.error or "unknown error"
             complete = False
-            print(
-                f"  [failed] {result.match_id}: {activity}", file=sys.stderr
-            )
+            print(f"  [failed] {result.match_id}: {activity}", file=sys.stderr)
         listener.event_fetched(index, label, activity, complete)
 
     def _print_failures(self, results: list[FetchResult]) -> None:
