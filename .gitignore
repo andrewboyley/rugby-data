@@ -9,9 +9,6 @@ wheels/
 # Virtual environments
 .venv
 
-# JS dependencies
-node_modules/
-
 # Generated data files
 *.json.tmp
 *.json.corrupt

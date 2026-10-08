@@ -1,144 +1,70 @@
-# Rugby Composition Predictor
+# Rugby Data
 
-Builds a dataset of international rugby union matches from World Rugby RIMS and
-ESPN, then visualises its temporal co-occurrence graph in the browser.
+Builds a versioned dataset of international rugby union matches from World Rugby
+RIMS and ESPN. It is a data pipeline, not a predictor.
 
-The dataset covers all international (national) teams. Match discovery
-iterates each team's events per year, so any competition a national team enters
-— across current or future leagues — is captured automatically.
-
-## Prerequisites
-
-- [uv](https://docs.astral.sh/uv/) — Python package manager
-- [just](https://github.com/casey/just) — command runner for the recipes below
-- Node.js + npm — for the web viewer
+`dataset.json` is the current product boundary. A later API can serve this same
+contract without changing its consumers.
 
 ## Setup
 
 ```sh
-just setup          # uv sync + install web dependencies
+just setup
 ```
 
-Run `just --list` to see all available commands.
+Requirements: [uv](https://docs.astral.sh/uv/) and
+[just](https://github.com/casey/just).
 
-## Build the dataset
+## Build a dataset
 
 ```sh
-just dataset        # fetch all international teams -> data/dataset.json
+just dataset
 ```
 
-Restrict to a single team with `--team <id>` (e.g. `just dataset --team 5`
-for South Africa); omit it to fetch all international teams.
+Use `--team <id>` for one team. Builds resume from `data/api_cache.json`.
+`--reset` rebuilds from cached responses without downloading again. Do not commit
+the generated dataset or API cache.
 
-Both steps are resumable and idempotent. Raw API responses are cached in
-`data/api_cache.json`, so re-runs are fast and do not hit the network for
-already-fetched events. If you delete `dataset.json` and want a full
-re-derive, pass `--reset`: it clears the processed-event markers and rebuilds
-from the cached raw responses (no re-download). To force a true re-download,
-delete `data/api_cache.json` as well.
+## Contract
 
-You can also run the Python package directly instead of via `just`:
-
-```sh
-.venv/bin/rugby-composition-predictor dataset
-```
-
-## Run the viewer
-
-Build and preview the static viewer:
-
-```sh
-just serve           # builds dist/, previews on http://localhost:8787
-```
-
-For live development with hot reload, run the dev server (port 5173):
-
-```sh
-just dev-start       # start the Vite dev server
-just dev-status      # show status / logs
-just dev-stop        # stop it
-```
-
-The viewer fetches `/data/dataset.json` and derives the reversible temporal
-graph in the browser.
-
-## Visualisation
-
-A Svelte app in `web/` renders the graph. Run it with `just serve` (or
-`just dev-start` for live reload — see above).
-
-Nodes are players (size = appearances, colour = modal jersey number), edges
-connect players who shared a match (width/opacity = co-occurrence count).
-Rendering and interaction use [sigma.js](https://www.sigmajs.org) on a
-[graphology](https://graphology.github.io) graph, with the
-ForceAtlas2 layout (`graphology-layout-forceatlas2`) running in one persistent
-web worker. Sigma renders temporal node and edge reducers directly from the
-dataset; the retired static `graph.json` renderer has been removed.
-
-Use Timeline to move through match dates, Home to restore the camera, and Grid
-to show reference coordinates. Filter by shared matches, team, date, or player;
-click a node to focus its teammates; use search to jump to a player or match.
-
-## Layout
-
-```
-data/   dataset.json, api_cache.json (generated)
-dist/   built viewer (generated)
-web/    Svelte source for the browser visualisation
-src/    rugby_composition_predictor package
-```
-
-## Data model
-
-`dataset.json`:
+Generated `data/dataset.json` is versioned:
 
 ```json
 {
-  "games": [
-    {
-      "eventId": 281087,
-      "date": "2016-08-20T15:05Z",
-      "venueId": "62",
-      "leagueId": "Tour 2016",
-      "competitors": [
-        {"teamId": 39, "home": true,  "score": 30, "coachId": "13193",
-         "roster": [{"playerId": 144732, "jersey": 15}]},
-        {"teamId": 40, "home": false, "score": 23, "coachId": "3114",
-         "roster": [{"playerId": 141716, "jersey": 15}]}
-      ]
-    }
-  ],
-  "teams":  {"39": "South Africa", "40": "Argentina"},
-  "players": {"144732": "Johan Goosen"},
-  "venues":  {"62": {"name": "Eden Park", "city": "Auckland",
-                     "country": "New Zealand"},
-              "98000": {"name": "Teufaiva Stadium", "city": "Nuku'alofa",
-                        "country": "Tonga"}},
-  "leagues": {"Tour 2016": {"name": "Tour 2016", "abbreviation": "Tour 2016"},
-              "10659": {"name": "International Test Match",
-                        "abbreviation": "International Test Match"}},
-  "coaches": {"13193": "Steve Hansen", "3114": "Warren Gatland"}
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-08T12:00:00Z",
+  "games": [],
+  "teams": {},
+  "players": {},
+  "venues": {},
+  "leagues": {},
+  "coaches": {}
 }
 ```
 
-All entity ids use the **RIMS/Opta id space** as the canonical namespace
-(World Rugby RIMS is Opta's rugby platform, so its numeric ids are Opta/Pulselive
-ids). The old `rims:`/`espn:` source prefixes are gone.
+- Event, player, coach, venue, and league IDs remain source strings.
+- Team IDs are numeric, serialized as JSON object keys in registries.
+- A game is emitted only with two competitors, non-empty rosters, and both
+  scores.
+- Dates use source ISO-8601 timestamps when supplied.
+- Roster jersey numbers 1–15 are starters; 16–23 are bench players.
 
-- `teams` / `players` / `coaches`: keyed by their RIMS/Opta id (numeric for
-  teams, numeric player ids for players and coaches). ESPN-sourced players are
-  best-effort canonicalised onto their RIMS/Opta id via a shared display name.
-- `venues`: keyed by the RIMS/Opta venue id (e.g. `"62"`) → `{name, city,
-  country}`. ESPN venues have no Opta crosswalk, so they keep their ESPN id
-  (e.g. `"98000"`).
-- `leagues`: keyed by the RIMS competition name (e.g. `"Tour 2016"`) or, for
-  ESPN-sourced matches, the ESPN league id (e.g. `"10659"`) → `{name,
-  abbreviation}`. RIMS derives the key from the match's `competition`; ESPN
-  from `header.league`.
-- `coaches`: keyed by player id → display name. Populated from competitor
-  roster entries flagged as coach / management in the source feed.
+Consumers should reject unsupported future schema versions. During migration,
+`Dataset.load()` still accepts prior unversioned files.
 
-Only complete games are kept: both competitors present, non-empty rosters,
-and both scores. Roster jerseys 1-15 are starters, 16-23 bench. Each
-`games[]` entry now carries `venueId` and `leagueId`, and each
-`competitors[]` entry carries `coachId`.
+## Commands
+
+```sh
+just check  # type and bytecode checks
+just test   # deterministic contract tests
+just lint   # lint source and tests
+```
+
+## Pipeline
+
+```text
+cli.py → DatasetBuilder → RIMS / ESPN clients → ApiCache → Dataset.save()
+```
+
+Raw responses stay in the local cache. Only the versioned dataset contract is
+intended for application or future API consumers.

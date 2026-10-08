@@ -4,17 +4,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rugby_composition_predictor.api import EspnApi
-from rugby_composition_predictor.builder import DatasetBuilder
-from rugby_composition_predictor.cache import ApiCache
-from rugby_composition_predictor.dataset import Dataset
-from rugby_composition_predictor.models import (
+from rugby_data.api import EspnApi
+from rugby_data.builder import DatasetBuilder
+from rugby_data.cache import ApiCache
+from rugby_data.dataset import Dataset
+from rugby_data.models import (
     Competitor,
     Game,
     RosterEntry,
     competitor_from_dict,
 )
-from rugby_composition_predictor.rims_api import RimsApi
+from rugby_data.rims_api import RimsApi
 
 
 class AuditRemediesTests(unittest.TestCase):

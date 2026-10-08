@@ -13,12 +13,12 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from rugby_composition_predictor.api import EspnApi
-from rugby_composition_predictor.builder import DatasetBuilder
-from rugby_composition_predictor.cache import ApiCache
-from rugby_composition_predictor.dataset import Dataset
-from rugby_composition_predictor.models import game_from_dict, game_to_dict
-from rugby_composition_predictor.rims_api import RimsApi
+from rugby_data.api import EspnApi
+from rugby_data.builder import DatasetBuilder
+from rugby_data.cache import ApiCache
+from rugby_data.dataset import Dataset
+from rugby_data.models import game_from_dict, game_to_dict
+from rugby_data.rims_api import RimsApi
 
 
 def main() -> int:
@@ -126,7 +126,7 @@ def main() -> int:
 
     # ---- ESPN team id -> RIMS/Opta mapping ----
     print("\n[ESPN] team id canonicalised to RIMS/Opta")
-    from rugby_composition_predictor.config import RIMS_TEAM_IDS
+    from rugby_data.config import RIMS_TEAM_IDS
 
     sample_espn = 5  # South Africa (ESPN id)
     expected_rims = int(RIMS_TEAM_IDS["5"])  # 39 (RIMS/Opta id)
