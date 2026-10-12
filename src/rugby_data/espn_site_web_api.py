@@ -44,6 +44,9 @@ class EspnSiteWebApi:
             timeout=timeout,
         )
 
+    def close(self) -> None:
+        self._transport.close()
+
     def get_summary(self, league_id: str, event_id: str) -> dict:
         url = (
             f"{self._base_url}/{league_id}/summary"

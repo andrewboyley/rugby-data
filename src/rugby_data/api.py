@@ -35,6 +35,9 @@ class EspnApi:
             timeout=timeout,
         )
 
+    def close(self) -> None:
+        self._transport.close()
+
     def get(self, url: str) -> dict:
         return self._transport.get(url)
 

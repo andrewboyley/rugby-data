@@ -68,8 +68,11 @@ def build_dataset(
     print(f"  Cache:    {cache_path} ({len(cache)} entries loaded)")
     print()
 
-    with RichProgressBar() as progress:
-        builder.build(progress, skip_failed=skip_failed)
+    try:
+        with RichProgressBar() as progress:
+            builder.build(progress, skip_failed=skip_failed)
+    finally:
+        builder.close()
 
 
 def main(argv=None) -> None:

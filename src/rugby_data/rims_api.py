@@ -5,6 +5,8 @@ import threading
 import time
 from collections import deque
 
+import httpx
+
 from .cache import ApiCache
 from .config import (
     REQUEST_TIMEOUT_SECONDS,
@@ -71,6 +73,9 @@ class RimsApi:
             retry_delay=self._retry_delay,
         )
 
+    def close(self) -> None:
+        self._transport.close()
+
     def get(self, url: str) -> dict:
         if url in self._cache:
             return self._cache.get(url)
@@ -123,7 +128,12 @@ class RimsApi:
         return self.get(url)
 
     def _retry_delay(self, error: Exception, attempt: int) -> float:
-        if getattr(error, "code", None) == 429:
+        status_code = (
+            error.response.status_code
+            if isinstance(error, httpx.HTTPStatusError)
+            else getattr(error, "code", None)
+        )
+        if status_code == 429:
             return max(2**attempt, 10)
         return 2**attempt
 

@@ -1,12 +1,18 @@
-"""Shared cached JSON transport for the source-specific API clients."""
+"""Shared cached JSON transport for source-specific API clients."""
 
 import json
 import sys
 import threading
-import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable
+
+import httpx
+from tenacity import (
+    RetryCallState,
+    RetryError,
+    Retrying,
+    retry_if_exception,
+    stop_after_attempt,
+)
 
 from .cache import ApiCache
 
@@ -46,14 +52,20 @@ class CachedJsonTransport:
         retries: int,
         timeout: int,
         retry_delay: Callable[[Exception, int], float] | None = None,
+        client: httpx.Client | None = None,
     ) -> None:
         self._cache = cache
         self._activity = activity
         self._describe = describe
-        self._headers = headers
         self._retries = retries
-        self._timeout = timeout
         self._retry_delay = retry_delay or (lambda _error, attempt: 2**attempt)
+        self._client = client or httpx.Client(headers=headers, timeout=timeout)
+        self._owns_client = client is None
+
+    def close(self) -> None:
+        """Close client created by this transport, not an injected client."""
+        if self._owns_client:
+            self._client.close()
 
     def get(self, url: str) -> dict:
         if url in self._cache:
@@ -64,19 +76,47 @@ class CachedJsonTransport:
         return data
 
     def fetch(self, url: str) -> dict:
-        request = urllib.request.Request(url, headers=self._headers)
-        for attempt in range(self._retries):
-            try:
-                with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                    return json.load(response)
-            except urllib.error.HTTPError as error:
-                if 400 <= error.code < 500 and error.code != 429:
-                    raise
-                self._retry(url, error, attempt)
-            except (OSError, json.JSONDecodeError) as error:
-                self._retry(url, error, attempt)
+        try:
+            for attempt in Retrying(
+                retry=retry_if_exception(self._is_retryable),
+                stop=stop_after_attempt(self._retries),
+                wait=lambda state: self._retry_delay_for(state),
+                before_sleep=lambda state: self._report_retry(url, state),
+            ):
+                with attempt:
+                    response = self._client.get(url)
+                    response.raise_for_status()
+                    return response.json()
+        except RetryError as error:
+            raise RuntimeError(
+                f"failed after {self._retries} attempts: {url}"
+            ) from error
         raise RuntimeError(f"failed after {self._retries} attempts: {url}")
 
-    def _retry(self, url: str, error: Exception, attempt: int) -> None:
-        print(f"  [retry {attempt}] {self._describe(url)}: {error}", file=sys.stderr)
-        time.sleep(self._retry_delay(error, attempt))
+    @staticmethod
+    def _is_retryable(error: BaseException) -> bool:
+        if isinstance(error, httpx.HTTPStatusError):
+            return (
+                error.response.status_code == 429 or error.response.status_code >= 500
+            )
+        return isinstance(
+            error,
+            (httpx.RequestError, OSError, json.JSONDecodeError, UnicodeDecodeError),
+        )
+
+    def _retry_delay_for(self, state: RetryCallState) -> float:
+        return self._retry_delay(self._retry_error(state), state.attempt_number - 1)
+
+    def _report_retry(self, url: str, state: RetryCallState) -> None:
+        error = self._retry_error(state)
+        print(
+            f"  [retry {state.attempt_number - 1}] {self._describe(url)}: {error}",
+            file=sys.stderr,
+        )
+
+    @staticmethod
+    def _retry_error(state: RetryCallState) -> Exception:
+        assert state.outcome is not None
+        error = state.outcome.exception()
+        assert isinstance(error, Exception)
+        return error

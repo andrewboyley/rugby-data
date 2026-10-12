@@ -77,6 +77,11 @@ class DatasetBuilder:
         if source in ("rims-first", "rims"):
             self._max_workers = min(self._max_workers, RIMS_MAX_WORKERS)
 
+    def close(self) -> None:
+        self._rims_api.close()
+        self._espn_api.close()
+        self._espn_site_web_api.close()
+
     def build(
         self,
         listener: BuildListener | None = None,
