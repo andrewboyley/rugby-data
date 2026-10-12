@@ -8,15 +8,18 @@ World Rugby RIMS and ESPN. It is a data pipeline, not a predictor.
 - Python 3.12+ package in `src/rugby_data/`.
 - Generated `data/dataset.json` is a versioned consumer artifact.
 - API cache and generated data remain local and ignored.
+- Modernized tooling: FastAPI/Uvicorn for API, HTTPX/Tenacity for transport, Typer for CLI, Pydantic v2 for data models.
 
 ## Commands
 
 ```sh
-just setup
-just dataset
-just check
-just test
-just lint
+just setup          # install dependencies
+just dataset        # build dataset
+just check          # type check
+just test           # run tests
+just lint           # lint and format check
+just install-hooks  # install pre-commit hooks (once per clone)
+just hooks          # run all hooks manually
 ```
 
 ## Data contract

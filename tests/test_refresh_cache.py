@@ -110,8 +110,9 @@ def test_reset_and_refresh_usage_error_happens_before_cache_changes(tmp_path):
     seed_cache(cache_path)
     before = cache_path.read_bytes()
 
-    with pytest.raises(SystemExit, match="2"):
+    with pytest.raises(SystemExit) as exc_info:
         cli.main(["dataset", "--cache", str(cache_path), "--reset", "--refresh"])
+    assert exc_info.value.code == 2
 
     assert cache_path.read_bytes() == before
 

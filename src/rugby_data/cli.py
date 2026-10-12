@@ -1,22 +1,27 @@
 """Command-line entry points for the rugby composition predictor."""
 
-import argparse
-import io
-import sys
 from pathlib import Path
 
+import typer
+import uvicorn
+
 from .api import EspnApi
+from .api_app import create_app
 from .builder import NEG_FAIL_PREFIX, DatasetBuilder
 from .cache import ApiCache
 from .config import (
     DEFAULT_CACHE_PATH,
     DEFAULT_DATASET_PATH,
-    INTERNATIONAL_TEAM_IDS,
 )
 from .dataset import Dataset
 from .reporting import RichProgressBar
 from .rims_api import RimsApi
-from .server import DatasetServer
+
+app = typer.Typer(
+    name="rugby-data",
+    help="Builds a cached, versioned dataset of international rugby union matches.",
+    no_args_is_help=True,
+)
 
 
 def build_dataset(
@@ -34,13 +39,7 @@ def build_dataset(
         dataset = Dataset()
         print("== Refresh: cleared local cache and rebuilding from upstream ==")
     elif reset:
-        # Forget which events were already processed AND start from an empty
-        # dataset, so every discovered event is re-derived from the cached raw
-        # responses. This discards any stale data from a previous schema (e.g.
-        # source-prefixed ids) and re-runs the parse/merge. No re-download.
         cache.reset_processed_to(set())
-        # Also drop the permanently-failed markers so --reset truly re-checks
-        # every match (the ESPN-fallback negatives are kept to avoid re-search).
         cache.delete_prefix(NEG_FAIL_PREFIX)
         dataset = Dataset()
         print("== Reset: cleared processed markers; rebuilding from empty dataset ==")
@@ -57,106 +56,101 @@ def build_dataset(
         team_ids=team_ids,
         source=source,
     )
-
-    if team_ids:
-        scope = ", ".join(team_ids)
-    else:
-        scope = f"all {len(INTERNATIONAL_TEAM_IDS)} international teams"
-    print("== International rugby dataset builder ==")
-    print(f"  Teams:    {scope}")
-    print(f"  Output:   {dataset_path}")
-    print(f"  Cache:    {cache_path} ({len(cache)} entries loaded)")
-    print()
-
+    progress = RichProgressBar()
     try:
-        with RichProgressBar() as progress:
-            builder.build(progress, skip_failed=skip_failed)
+        builder.build(progress, skip_failed=skip_failed)
+        dataset.save(dataset_path)
     finally:
         builder.close()
 
 
-def main(argv=None) -> None:
-    try:
-        if isinstance(sys.stdout, io.TextIOWrapper):
-            sys.stdout.reconfigure(line_buffering=True)
-    except (AttributeError, ValueError):
-        pass
-
-    parser = argparse.ArgumentParser(
-        prog="rugby-data",
-        description="Build an international rugby match dataset.",
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    dataset_cmd = sub.add_parser("dataset", help="build dataset.json")
-    dataset_cmd.add_argument(
+@app.command("dataset")
+def dataset_command(
+    output: Path = typer.Option(
+        DEFAULT_DATASET_PATH,
         "--output",
-        default=DEFAULT_DATASET_PATH,
-        help="output path (default: %(default)s)",
-    )
-    dataset_cmd.add_argument(
-        "--cache", default=DEFAULT_CACHE_PATH, help="cache path (default: %(default)s)"
-    )
-    dataset_cmd.add_argument(
+        "-o",
+        help="Path to output dataset.json",
+    ),
+    cache: Path = typer.Option(
+        DEFAULT_CACHE_PATH,
+        "--cache",
+        "-c",
+        help="Path to API response cache file",
+    ),
+    team: list[str] | None = typer.Option(
+        None,
         "--team",
-        default=None,
-        help="restrict to a single team id (default: all international teams)",
-    )
-    dataset_cmd.add_argument(
+        "-t",
+        help="Team ID to build (can specify multiple times).",
+    ),
+    source: str = typer.Option(
+        "rims-first",
         "--source",
-        default="rims-first",
-        choices=["rims-first", "rims", "espn"],
-        help="data source: rims-first (default), rims, or espn",
-    )
-    dataset_cmd.add_argument(
+        "-s",
+        help="Data source mode: rims-first (default), espn-only, rims-only",
+    ),
+    reset: bool = typer.Option(
+        False,
         "--reset",
-        action="store_true",
-        help="clear processed-event markers and re-derive the dataset from "
-        "the API cache (no re-download; use after deleting dataset.json)",
-    )
-    dataset_cmd.add_argument(
+        help="Rebuild dataset from cached responses without re-downloading",
+    ),
+    skip_failed: bool = typer.Option(
+        False,
         "--skip-failed",
-        action="store_true",
-        help="skip matches previously recorded as permanently unresolvable "
-        "(RIMS has no roster and no usable ESPN fallback)",
-    )
-    dataset_cmd.add_argument(
+        help="Skip events that previously failed or were not found in ESPN",
+    ),
+    refresh: bool = typer.Option(
+        False,
         "--refresh",
-        action="store_true",
-        help="clear local cache and processed markers, then fetch upstream again",
+        help="Clear cache and re-download all data from upstream",
+    ),
+) -> None:
+    """Build the international rugby dataset."""
+    if reset and refresh:
+        typer.echo("Error: --reset and --refresh cannot be used together")
+        raise typer.Exit(code=2)
+
+    build_dataset(
+        dataset_path=output,
+        cache_path=cache,
+        team_ids=team,
+        source=source,
+        reset=reset,
+        skip_failed=skip_failed,
+        refresh=refresh,
     )
 
-    serve_cmd = sub.add_parser("serve", help="serve dataset.json over HTTP")
-    serve_cmd.add_argument(
+
+@app.command("serve")
+def serve_command(
+    dataset: Path = typer.Option(
+        DEFAULT_DATASET_PATH,
         "--dataset",
-        default=DEFAULT_DATASET_PATH,
-        help="dataset path (default: %(default)s)",
-    )
-    serve_cmd.add_argument("--host", default="127.0.0.1", help="bind host")
-    serve_cmd.add_argument("--port", default=8000, type=int, help="bind port")
+        "-d",
+        help="Path to dataset.json artifact",
+    ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Host to bind the server to",
+    ),
+    port: int = typer.Option(
+        8000,
+        "--port",
+        help="Port to bind the server to",
+    ),
+) -> None:
+    """Serve the local versioned dataset over HTTP."""
+    app_instance = create_app(Path(dataset))
+    print(f"Serving dataset at http://{host}:{port}/dataset")
+    uvicorn.run(app_instance, host=host, port=port, log_level="warning")
 
-    args = parser.parse_args(argv)
-    if args.command == "dataset" and args.reset and args.refresh:
-        parser.error("--reset and --refresh cannot be used together")
 
-    if args.command == "dataset":
-        team_ids = [args.team] if args.team else None
-        build_dataset(
-            Path(args.output),
-            Path(args.cache),
-            team_ids=team_ids,
-            source=args.source,
-            reset=args.reset,
-            skip_failed=args.skip_failed,
-            refresh=args.refresh,
-        )
-    elif args.command == "serve":
-        server = DatasetServer((args.host, args.port), Path(args.dataset))
-        host, port = server.server_address[:2]
-        print(f"Serving dataset at http://{host}:{port}/dataset")
-        try:
-            server.serve_forever()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            server.server_close()
+def main(args: list[str] | None = None) -> None:
+    """Entry point for console script."""
+    app(args=args)
+
+
+if __name__ == "__main__":
+    main()

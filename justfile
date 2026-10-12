@@ -27,11 +27,25 @@ check:
 
 # Run deterministic tests (excludes local-cache diagnostic test_fetch_entities.py).
 test:
-    {{ venv }}/python -m unittest discover -s tests -p 'test_*.py'
+    {{ venv }}/pytest tests
 
-# Lint Python source and tests.
+# Lint and format-check Python source and tests.
 lint:
     {{ venv }}/ruff check src tests
+    {{ venv }}/ruff format --check src tests
+
+# Install repository pre-commit and commit-message hooks.
+install-hooks:
+    {{ venv }}/pre-commit install
+    {{ venv }}/pre-commit install --hook-type commit-msg
+
+# Run all repository pre-commit hooks without committing.
+hooks:
+    {{ venv }}/pre-commit run --all-files
+
+# Create a Conventional Commit (hooks validate message format).
+commit *args:
+    git commit {{ args }}
 
 # Show working-tree status.
 status:

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import CACHE_PROCESSED_KEY, CACHE_SOFT_WRITE_LIMIT
+from .storage import atomic_write_json
 
 
 def _norm_processed_key(key: int | str) -> str:
@@ -116,11 +117,5 @@ class ApiCache:
                 return
             payload = dict(self._entries)
             payload[CACHE_PROCESSED_KEY] = sorted(self._processed)
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-            with open(tmp, "w") as f:
-                json.dump(payload, f)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self._path)
+            atomic_write_json(self._path, payload)
             self._pending_writes = 0

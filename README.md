@@ -3,8 +3,8 @@
 Builds a versioned dataset of international rugby union matches from World Rugby
 RIMS and ESPN. It is a data pipeline, not a predictor.
 
-`dataset.json` is the current product boundary. A later API can serve this same
-contract without changing its consumers.
+`dataset.json` is the current product boundary. A local API serves this same
+contract without creating a second graph export.
 
 ## Setup
 
@@ -100,3 +100,28 @@ cli.py → DatasetBuilder → RIMS / ESPN clients → ApiCache → Dataset.save(
 
 Raw responses stay in the local cache. Only the versioned dataset contract is
 intended for application or future API consumers.
+
+## Development Tools
+
+- **Superpowers**: Guides structured development with planning, TDD, and parallel subagents. Plans live in `docs/superpowers/plans/`.
+- **repowise**: Codebase health, evolution insights, and code review context.
+- **ccc** (CocoIndex Code): Semantic code search — finds code by meaning, not keyword. Run `ccc search <query>` from the project root.
+- **Codegraph**: Explores call paths, symbol definitions, and cross-file relationships. Run `codegraph explore "<query>"`.
+
+## Contributing
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
+
+```
+<type>[optional scope]: <description>
+
+Types: feat, fix, docs, refactor, test, chore, perf, ci, revert
+```
+
+Examples: `feat(api): add health endpoint`, `fix(transport): handle 429 retry delay`, `docs: update README`.
+
+Pre-commit hooks validate commit messages and run lint automatically:
+
+```sh
+just install-hooks  # install once
+```

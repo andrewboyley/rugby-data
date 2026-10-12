@@ -101,7 +101,7 @@ class CachedJsonTransport:
             )
         return isinstance(
             error,
-            (httpx.RequestError, OSError, json.JSONDecodeError, UnicodeDecodeError),
+            httpx.RequestError | OSError | json.JSONDecodeError | UnicodeDecodeError,
         )
 
     def _retry_delay_for(self, state: RetryCallState) -> float:
