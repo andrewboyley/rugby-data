@@ -199,3 +199,8 @@ RIMS_TEAM_NAMES: dict[str, str] = {
     "49": "Japan",
     "51": "USA",
 }
+
+# Prefix for cache entries recording a match that is deterministically
+# unresolvable (RIMS has no usable roster and no ESPN fallback exists/completes).
+# Used by --skip-failed to omit such matches on subsequent builds.
+NEG_FAIL_PREFIX = "negative://failed/"

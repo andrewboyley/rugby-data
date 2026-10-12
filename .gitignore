@@ -15,6 +15,9 @@ wheels/
 # CodeGraph index
 /.codegraph/
 
+# Repowise local index / cache
+/.repowise/
+
 data/*
 *.gz
 # CocoIndex Code (ccc)
