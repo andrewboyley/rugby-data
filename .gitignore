@@ -26,6 +26,12 @@ data/*
 # Agent / tooling internal state (not project source)
 /.cocoindex/
 
+# Repowise / agent editor config (generated locally, machine-specific)
+/.claude/
+/.github/copilot-instructions.md
+/.mcp.json
+/opencode.jsonc
+
 # Build / test artifacts
 dist/
 web/dist/
