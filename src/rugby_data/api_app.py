@@ -30,7 +30,8 @@ class DatasetSnapshot:
             if (stat.st_mtime_ns, stat.st_size) != self._stat_key:
                 self.reload()
         except (FileNotFoundError, ValueError, json.JSONDecodeError):
-            pass
+            # Artifact is missing or mid-write; keep serving the last snapshot.
+            return
 
     def reload(self) -> None:
         stat = self._path.stat()

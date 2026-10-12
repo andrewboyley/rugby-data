@@ -1,12 +1,15 @@
 """World Rugby RIMS API client with caching, retries, rate limiting,
 and activity tracking."""
 
+from __future__ import annotations
+
 import threading
 import time
 from collections import deque
 
 import httpx
 
+from .api_client import BaseApiClient
 from .cache import ApiCache
 from .config import (
     REQUEST_TIMEOUT_SECONDS,
@@ -16,7 +19,6 @@ from .config import (
     RIMS_RATE_LIMIT_PER_MIN,
     USER_AGENT,
 )
-from .transport import ActivityTracker, CachedJsonTransport
 
 
 class RateLimiter:
@@ -45,36 +47,29 @@ class RateLimiter:
             self._times.append(now)
 
 
-class RimsApi:
+class RimsApi(BaseApiClient):
+    base_url_default = RIMS_API_BASE
+
     def __init__(
         self,
         cache: ApiCache,
-        base_url: str = RIMS_API_BASE,
+        base_url: str | None = None,
         *,
         retries: int = RETRY_ATTEMPTS,
         timeout: int = REQUEST_TIMEOUT_SECONDS,
         user_agent: str = USER_AGENT,
         rate_limit_per_min: int = RIMS_RATE_LIMIT_PER_MIN,
     ):
-        self._cache = cache
-        self._base_url = base_url
-        self._retries = retries
-        self._timeout = timeout
-        self._user_agent = user_agent
         self._limiter = RateLimiter(rate_limit_per_min)
-        self.activity = ActivityTracker()
-        self._transport = CachedJsonTransport(
+        super().__init__(
             cache,
-            self.activity,
-            self._describe,
-            headers={"User-Agent": user_agent, **RIMS_HEADERS},
+            base_url,
             retries=retries,
             timeout=timeout,
+            user_agent=user_agent,
+            extra_headers=RIMS_HEADERS,
             retry_delay=self._retry_delay,
         )
-
-    def close(self) -> None:
-        self._transport.close()
 
     def get(self, url: str) -> dict:
         if url in self._cache:
@@ -138,7 +133,7 @@ class RimsApi:
         return 2**attempt
 
     def _describe(self, url: str) -> str:
-        path = url.replace(self._base_url, "").split("?")[0].rstrip("/")
+        path = self._path(url)
         if path.startswith("/match/") and "/summary" in path:
             return f"summary {path.split('/')[2][:8]}"
         if path == "/match":

@@ -7,45 +7,16 @@ flag, and the athlete id), so it is the natural source for lineups when the
 CORE API has none.
 """
 
+from __future__ import annotations
+
 import re
 
-from .cache import ApiCache
-from .config import (
-    REQUEST_TIMEOUT_SECONDS,
-    RETRY_ATTEMPTS,
-    SITE_WEB_API_BASE,
-    USER_AGENT,
-)
-from .transport import ActivityTracker, CachedJsonTransport
+from .api_client import BaseApiClient
+from .config import SITE_WEB_API_BASE
 
 
-class EspnSiteWebApi:
-    def __init__(
-        self,
-        cache: ApiCache,
-        base_url: str = SITE_WEB_API_BASE,
-        *,
-        retries: int = RETRY_ATTEMPTS,
-        timeout: int = REQUEST_TIMEOUT_SECONDS,
-        user_agent: str = USER_AGENT,
-    ):
-        self._cache = cache
-        self._base_url = base_url
-        self._retries = retries
-        self._timeout = timeout
-        self._user_agent = user_agent
-        self.activity = ActivityTracker()
-        self._transport = CachedJsonTransport(
-            cache,
-            self.activity,
-            self._describe,
-            headers={"User-Agent": user_agent},
-            retries=retries,
-            timeout=timeout,
-        )
-
-    def close(self) -> None:
-        self._transport.close()
+class EspnSiteWebApi(BaseApiClient):
+    base_url_default = SITE_WEB_API_BASE
 
     def get_summary(self, league_id: str, event_id: str) -> dict:
         url = (
@@ -54,11 +25,8 @@ class EspnSiteWebApi:
         )
         return self.get(url)
 
-    def get(self, url: str) -> dict:
-        return self._transport.get(url)
-
     def _describe(self, url: str) -> str:
-        path = url.replace(self._base_url, "").split("?")[0].rstrip("/")
+        path = self._path(url)
         if path.endswith("/summary"):
             league = path.rsplit("/summary", 1)[0].lstrip("/")
             event = ""

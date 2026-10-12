@@ -39,26 +39,8 @@ class EspnGameMixin(BuilderBase):
             return None
         try:
             competition = summary.get("header", {}).get("competitions", [{}])[0]
-            scores_by_team = {
-                int(c.get("id")): self._parse_site_web_score(c.get("score"))
-                for c in competition.get("competitors", [])
-            }
-            competitors = []
-            for roster_block in summary.get("rosters") or []:
-                team = roster_block.get("team") or {}
-                espn_team_id = int(team.get("id") or 0)
-                team_id = self._to_rims_team_id(espn_team_id)
-                self._register_team_from_site_web(team_id, team, espn_team_id)
-                competitors.append(
-                    Competitor(
-                        team_id=team_id,
-                        home=roster_block.get("homeAway") == "home",
-                        score=scores_by_team.get(espn_team_id),
-                        roster=self._parse_site_web_roster(
-                            roster_block.get("roster") or []
-                        ),
-                    )
-                )
+            scores_by_team = self._site_web_scores(competition)
+            competitors = self._site_web_competitors(summary, scores_by_team)
             if not competitors:
                 return None
             venue_id = self._register_venue_from_site_web(summary)
@@ -74,6 +56,33 @@ class EspnGameMixin(BuilderBase):
             print(f"[WARN] ESPN site web game parse failed: {exc}", file=sys.stderr)
             return None
 
+    def _site_web_scores(self, competition: dict) -> dict:
+        return {
+            int(c.get("id")): self._parse_site_web_score(c.get("score"))
+            for c in competition.get("competitors", [])
+        }
+
+    def _site_web_competitors(
+        self, summary: dict, scores_by_team: dict
+    ) -> list[Competitor]:
+        competitors = []
+        for roster_block in summary.get("rosters") or []:
+            team = roster_block.get("team") or {}
+            espn_team_id = int(team.get("id") or 0)
+            team_id = self._to_rims_team_id(espn_team_id)
+            self._register_team_from_site_web(team_id, team, espn_team_id)
+            competitors.append(
+                Competitor(
+                    team_id=team_id,
+                    home=roster_block.get("homeAway") == "home",
+                    score=scores_by_team.get(espn_team_id),
+                    roster=self._parse_site_web_roster(
+                        roster_block.get("roster") or []
+                    ),
+                )
+            )
+        return competitors
+
     def _register_venue_from_site_web(self, summary: dict) -> str | None:
         venue = (summary.get("gameInfo") or {}).get("venue") or {}
         venue_id = venue.get("id")
@@ -84,22 +93,20 @@ class EspnGameMixin(BuilderBase):
         if self._dataset.venue_name(key):
             return key
         try:
-            self._dataset.register_venue(
-                key,
-                venue.get("fullName") or venue.get("shortName") or str(venue_id),
-                city=venue.get("address", {}).get("city")
-                if isinstance(venue.get("address"), dict)
-                else None,
-                country=venue.get("country")
-                or (
-                    venue.get("address", {}).get("country")
-                    if isinstance(venue.get("address"), dict)
-                    else None
-                ),
-            )
+            name, city, country = self._venue_details(venue, key)
+            self._dataset.register_venue(key, name, city=city, country=country)
         except Exception as exc:
             print(f"[WARN] site web venue register failed: {exc}", file=sys.stderr)
         return key
+
+    def _venue_details(
+        self, venue: dict, key: str
+    ) -> tuple[str, str | None, str | None]:
+        address = venue.get("address")
+        if not isinstance(address, dict):
+            address = {}
+        name = venue.get("fullName") or venue.get("shortName") or key
+        return name, address.get("city"), venue.get("country") or address.get("country")
 
     def _register_league_from_site_web(self, summary: dict) -> str | None:
         league = (summary.get("header") or {}).get("league") or {}
@@ -134,36 +141,31 @@ class EspnGameMixin(BuilderBase):
         if self._dataset.team_name(team_id):
             return
         try:
-            name = team.get("displayName") or team.get("name") or str(team_id)
             # Curated kit colours are keyed by ESPN id; the canonical team id
             # is the RIMS/Opta id, so look colours up via the ESPN id when known.
             colour_key = str(espn_team_id) if espn_team_id is not None else str(team_id)
-            color = HOME_KIT_COLOURS.get(colour_key) or team.get("color")
-            if color and isinstance(color, str):
-                color = "#" + color.lstrip("#")
-            else:
-                color = None
-            alternate_color = SECONDARY_KIT_COLOURS.get(colour_key) or team.get(
-                "alternateColor"
-            )
-            if alternate_color and isinstance(alternate_color, str):
-                alternate_color = "#" + alternate_color.lstrip("#")
-            else:
-                alternate_color = None
-            # ESPN team may have abbreviation field
-            abbreviation = team.get("abbreviation")
+            color, alternate_color = self._site_web_team_colours(team, colour_key)
             self._dataset.register_team(
                 team_id,
-                name,
+                team.get("displayName") or team.get("name") or str(team_id),
                 color,
                 alternate_color=alternate_color,
-                abbreviation=abbreviation,
+                abbreviation=team.get("abbreviation"),
             )
         except Exception as exc:
             print(
                 f"[WARN] site web team register failed for {team_id}: {exc}",
                 file=sys.stderr,
             )
+
+    def _site_web_team_colours(
+        self, team: dict, colour_key: str
+    ) -> tuple[str | None, str | None]:
+        color = HOME_KIT_COLOURS.get(colour_key) or team.get("color")
+        alternate_color = SECONDARY_KIT_COLOURS.get(colour_key) or team.get(
+            "alternateColor"
+        )
+        return self._normalise_colour(color), self._normalise_colour(alternate_color)
 
     def _espn_event_path(self, event_url: str) -> tuple[str, str] | None:
         """Extract (league_id, event_id) from a CORE API event url."""

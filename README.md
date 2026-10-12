@@ -98,6 +98,12 @@ just lint   # lint source and tests
 cli.py → DatasetBuilder → RIMS / ESPN clients → ApiCache → Dataset.save()
 ```
 
+`DatasetBuilder` is a thin facade that composes single-purpose mixins:
+discovery (`build_discovery.py`), fetch orchestration and RIMS-first fallback
+(`game_fetch.py`, `build_run.py`), RIMS parsing (`rims_game.py`,
+`rims_entities.py`), ESPN site-web parsing (`espn_game.py`), reporting
+(`build_reporting.py`), and the negative cache (`build_cache.py`).
+
 Raw responses stay in the local cache. Only the versioned dataset contract is
 intended for application or future API consumers.
 
