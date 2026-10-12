@@ -148,7 +148,7 @@ def serve_command(
 
 
 def main(args: list[str] | None = None) -> None:
-    """Entry point for console script."""
+    """Entry point for console script and legacy programmatic callers."""
     app(args=args)
 
 
