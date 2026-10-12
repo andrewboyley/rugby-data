@@ -1,47 +1,69 @@
 # Rugby Data
 
-Builds a versioned dataset of international rugby union matches from World Rugby
-RIMS and ESPN. It is a data pipeline, not a predictor.
+This package builds a versioned dataset of international rugby union matches.
+The dataset is one JSON file of matches, teams, players, venues, leagues, and
+coaches. The build downloads data from World Rugby RIMS and ESPN. The package
+is a data pipeline. It does not predict results.
 
-`dataset.json` is the current product boundary. A local API serves this same
-contract without creating a second graph export.
+`data/dataset.json` is the product boundary. The product boundary is the file
+that consumers read. A local API serves the same contract. The contract is the
+fixed structure of the dataset file. The API does not make a second graph
+export.
 
 ## Setup
+
+Install the dependencies:
 
 ```sh
 just setup
 ```
 
-Requirements: [uv](https://docs.astral.sh/uv/) and
+The setup needs [uv](https://docs.astral.sh/uv/) and
 [just](https://github.com/casey/just).
 
 ## Build a dataset
+
+Build all teams:
 
 ```sh
 just dataset
 ```
 
-Use `--team <id>` for one team. Builds resume from `data/api_cache.json`.
-`--reset` rebuilds from cached responses without downloading again. Use
-`--refresh` to clear the cache and processed markers, then fetch upstream again:
+Add `--team <id>` to build one team. A build continues from the last saved game
+and reads the API cache in `data/api_cache.json`. The API cache is a local store
+of the raw responses from the sources.
+
+The `just dataset` command also takes these options:
+
+- `--reset` builds the dataset again from the cached responses. It does not
+  download again.
+- `--refresh` erases the cache and the processed markers. Then it downloads all
+  data again from the sources.
+- `--source` selects the source mode. The default is `rims-first`. Other values
+  are `espn-only` and `rims-only`.
+- `--skip-failed` skips events that failed or were not found in ESPN before.
+
+Example:
 
 ```sh
 just dataset -- --refresh
 ```
 
-`--reset` and `--refresh` cannot be combined. Do not commit the generated dataset
-or API cache.
+You cannot use `--reset` and `--refresh` together. Do not commit the generated
+dataset or the API cache.
 
 ## Serve the dataset
+
+Serve the existing dataset:
 
 ```sh
 just serve
 ```
 
-The optional server binds to `127.0.0.1:8000` and only serves the existing local
-artifact; it never rebuilds or calls upstream APIs. Build or refresh in a separate
-command. Atomic dataset writes are detected on the next request without restarting
-server.
+The server binds to `127.0.0.1:8000` by default. The server only reads the
+local artifact. It never builds the dataset and never calls the sources. Build
+or refresh the dataset in a separate command. The server detects an atomic
+dataset write on the next request. It does not need a restart.
 
 | Endpoint | Response |
 | --- | --- |
@@ -54,12 +76,12 @@ server.
 | `GET /leagues/<leagueId>` | League registry fragment |
 | `GET /coaches/<coachId>` | Coach registry fragment |
 
-Responses are JSON. Unknown paths return `404`; non-GET requests return `405`.
-`/dataset` supports ETag revalidation.
+Responses are JSON. An unknown path returns `404`. A request with a different
+method returns `405`. `/dataset` supports ETag revalidation.
 
 ## Contract
 
-Generated `data/dataset.json` is versioned:
+The generated `data/dataset.json` file has a schema version:
 
 ```json
 {
@@ -74,15 +96,16 @@ Generated `data/dataset.json` is versioned:
 }
 ```
 
-- Event, player, coach, venue, and league IDs remain source strings.
-- Team IDs are numeric, serialized as JSON object keys in registries.
-- A game is emitted only with two competitors, non-empty rosters, and both
-  scores.
-- Dates use source ISO-8601 timestamps when supplied.
-- Roster jersey numbers 1–15 are starters; 16–23 are bench players.
+- Event, player, coach, venue, and league IDs stay source strings.
+- Team IDs are numbers. The registries use them as JSON object keys.
+- The build writes a game only when the game has two competitors, a roster on
+  each side, and both scores.
+- Dates use source ISO-8601 timestamps when the source gives them.
+- In a matchday squad, jersey numbers 1 to 15 are starters and 16 to 23 are
+  replacements.
 
-Consumers should reject unsupported future schema versions. During migration,
-`Dataset.load()` still accepts prior unversioned files.
+Consumers must reject a future schema version that they do not support. During
+migration, `Dataset.load()` still accepts older files without a schema version.
 
 ## Commands
 
@@ -98,25 +121,32 @@ just lint   # lint source and tests
 cli.py → DatasetBuilder → RIMS / ESPN clients → ApiCache → Dataset.save()
 ```
 
-`DatasetBuilder` is a thin facade that composes single-purpose mixins:
+`DatasetBuilder` is a thin facade. It composes mixins with one purpose each:
 discovery (`build_discovery.py`), fetch orchestration and RIMS-first fallback
 (`game_fetch.py`, `build_run.py`), RIMS parsing (`rims_game.py`,
 `rims_entities.py`), ESPN site-web parsing (`espn_game.py`), reporting
 (`build_reporting.py`), and the negative cache (`build_cache.py`).
 
-Raw responses stay in the local cache. Only the versioned dataset contract is
-intended for application or future API consumers.
+A mixin is a class fragment that adds methods to one class. The raw responses
+stay in the local cache. Only the versioned dataset contract is for other
+applications or future API consumers.
 
-## Development Tools
+## Development tools
 
-- **Superpowers**: Guides structured development with planning, TDD, and parallel subagents. Plans live in `docs/superpowers/plans/`.
-- **repowise**: Codebase health, evolution insights, and code review context.
-- **ccc** (CocoIndex Code): Semantic code search — finds code by meaning, not keyword. Run `ccc search <query>` from the project root.
-- **Codegraph**: Explores call paths, symbol definitions, and cross-file relationships. Run `codegraph explore "<query>"`.
+The project uses these tools:
+
+- Superpowers guides development with plans, tests, and parallel subagents. The
+  plans are in `docs/superpowers/plans/`.
+- repowise reports code health, change history, and review context.
+- ccc (CocoIndex Code) finds code by meaning, not by keyword. Run
+  `ccc search <query>` from the project root.
+- Codegraph reads call paths, symbol definitions, and cross-file relations. Run
+  `codegraph explore "<query>"`.
 
 ## Contributing
 
-This project uses [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
+The project uses
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/).
 
 ```
 <type>[optional scope]: <description>
@@ -126,8 +156,9 @@ Types: feat, fix, docs, refactor, test, chore, perf, ci, revert
 
 Examples: `feat(api): add health endpoint`, `fix(transport): handle 429 retry delay`, `docs: update README`.
 
-Pre-commit hooks validate commit messages and run lint automatically:
+The pre-commit hooks make sure that the commit message has the correct format.
+They also run the linter. Install the hooks once:
 
 ```sh
-just install-hooks  # install once
+just install-hooks
 ```

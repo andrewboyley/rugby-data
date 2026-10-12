@@ -1,5 +1,9 @@
 # Refactor DatasetBuilder God Class
 
+> Status: this plan is historical. The work is complete. The result uses
+> mixins, not the separate classes in the Proposed Solution section. The README
+> Pipeline section lists the final files.
+
 ## Problem
 The DatasetBuilder class in src/rugby_data/builder.py is a god class with:
 - 711 lines across 39 methods

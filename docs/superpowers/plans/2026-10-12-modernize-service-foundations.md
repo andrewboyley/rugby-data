@@ -1,14 +1,17 @@
 # Modernize Service Foundations Implementation Plan
 
+> Status: this plan is historical. The work is complete. The final file layout
+> is in the code and in `docs/superpowers/ledger-modernize-service-foundations.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Modernize the rugby-data pipeline by replacing custom HTTP/CLI/transport plumbing with FastAPI, HTTPX/Tenacity, Typer, and Pydantic while preserving schema v1 contract, cache semantics, and all existing behavior.
 
-**Architecture:** This plan implements the OpenSpec change `modernize-service-foundations`. We maintain the existing dataset contract and cache format, convert models to Pydantic v2 with aliases for compatibility, migrate upstream transport to HTTPX/Tenacity preserving retry/backoff policy, replace the stdlib HTTP server with FastAPI, and replace argparse with Typer. Tests validate behavioral preservation.
+**Architecture:** This plan modernizes the service foundations. The work keeps the existing dataset contract and cache format, converts the models to Pydantic v2 with aliases for compatibility, moves upstream transport to HTTPX and Tenacity with the retry and backoff policy, replaces the standard-library HTTP server with FastAPI, and replaces argparse with Typer. Tests make sure that the behavior stays the same.
 
 **Tech Stack:** Python 3.12+, FastAPI, Uvicorn, HTTPX, Tenacity, Typer, Pydantic v2, ruff, pytest (via just).
 
-**Spec:** `openspec/changes/modernize-service-foundations/` — see `proposal.md`, `design.md`, `tasks.md` and specs in `specs/dataset-*/spec.md`.
+**Spec:** This plan replaces the earlier OpenSpec change. The contract rules are in the Global Constraints section that follows.
 
 ## Global Constraints
 
@@ -172,10 +175,9 @@
 ## 3. Upstream transport
 
 **Files:**
-- Create: `src/rugby_data/http.py` (HTTPX client factory with Tenacity retries)
-- Modify: `src/rugby_data/transport.py` (or replace internals to delegate to http.py while keeping same API: `CachedJsonTransport`, `ActivityTracker`)
-- Modify: `src/rugby_data/api.py`, `src/rugby_data/rims_api.py` (if needed, minimal changes)
-- Test: `tests/test_transport_mock.py` (new) per 3.3
+- Modify: `src/rugby_data/transport.py` (add the HTTPX client factory with Tenacity retries, and keep the same API: `CachedJsonTransport`, `ActivityTracker`)
+- Modify: `src/rugby_data/api.py`, `src/rugby_data/rims_api.py` (if needed, small changes)
+- Test: `tests/test_transport.py` (add mocked transport coverage) per 3.3
 
 **Interfaces:**
 - Keep `CachedJsonTransport.get(url)`, `fetch(url)`, `ActivityTracker.snapshot()`, and the `describe`/retry policy hook. Preserve cache-first behavior, source headers, timeouts.
@@ -188,7 +190,7 @@
   Run: `uv run pytest -v`
   Expected: as appropriate.
 - [ ] **Step 3: Implement http layer**
-  Create `src/rugby_data/http.py` with a synchronous HTTPX client (or factory). Keep timeouts and headers as before.
+  Create the synchronous HTTPX client in `src/rugby_data/transport.py`. Keep the timeouts and the headers as before.
 - [ ] **Step 4: Refactor transport to use HTTPX**
   Modify `src/rugby_data/transport.py`: use HTTPX for actual requests. Preserve `ActivityTracker` behavior. Cache-first: if in cache, return from cache; else record activity, fetch, store.
 - [ ] **Step 5: Run tests to verify they pass**
@@ -196,7 +198,7 @@
   Expected: PASS.
 - [ ] **Step 6: Commit**
   ```bash
-  git add src/rugby_data/http.py src/rugby_data/transport.py
+  git add src/rugby_data/transport.py
   git commit -m "refactor: migrate transport to HTTPX client"
   ```
 
@@ -221,18 +223,18 @@
 ### 3.3 Add mocked transport coverage
 
 - [ ] **Step 1: Write the failing tests**
-  Create `tests/test_transport_mock.py` covering: cache hits (no fetch), success, retryable failures (429/5xx), terminal 4xx (non-retryable), invalid JSON.
+  Create `tests/test_transport.py` covering: cache hits (no fetch), success, retryable failures (429/5xx), terminal 4xx (non-retryable), invalid JSON.
 - [ ] **Step 2: Run tests to verify they fail**
-  Run: `uv run pytest tests/test_transport_mock.py -v`
+  Run: `uv run pytest tests/test_transport.py -v`
   Expected: FAIL (new).
 - [ ] **Step 3: Ensure transport satisfies mocks**
   Adjust transport implementation if gaps found.
 - [ ] **Step 4: Run tests to verify they pass**
-  Run: `uv run pytest tests/test_transport_mock.py -v`
+  Run: `uv run pytest tests/test_transport.py -v`
   Expected: PASS.
 - [ ] **Step 5: Commit**
   ```bash
-  git add tests/test_transport_mock.py
+  git add tests/test_transport.py
   git commit -m "test: add mocked transport coverage"
   ```
 

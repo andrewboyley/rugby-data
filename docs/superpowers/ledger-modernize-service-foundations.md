@@ -1,5 +1,8 @@
 # Execution Ledger: modernize-service-foundations
 
+> Status: historical record. The listed work is complete. The test counts are
+> from the time of the work.
+
 ## Task 1: Public API Models → Pydantic v2
 ✅ Completed: Converted models to Pydantic v2 while preserving camelCase serialization, positional constructors, helper APIs, and existing filtering behavior. Added dataset validation tests.
 
